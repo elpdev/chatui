@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -17,6 +17,32 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Compute release tag
+        id: version
+        run: |
+          ts="$(date -u +'%Y%m%d-%H%M%S')"
+          short_sha="${GITHUB_SHA::7}"
+          echo "tag=release-${ts}-${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Create git tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            "/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${{ steps.version.outputs.tag }}" \
+            -f sha="${GITHUB_SHA}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "${GITHUB_SHA}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes "Automated release for ${GITHUB_SHA}."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -36,6 +62,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=main
+            type=raw,value=${{ steps.version.outputs.tag }}
             type=sha,format=short,prefix=sha-
 
       - name: Build and push relay image
