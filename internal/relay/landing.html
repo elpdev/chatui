@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pando - Speak Freely</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0B1220;
+      --bg-2: #111A2C;
+      --bg-3: #18233D;
+      --hairline: #2A3752;
+      --phosphor: #9FE8B0;
+      --phosphor-dim: #5A8A68;
+      --phosphor-faint: #3A5A44;
+      --amber: #FFB347;
+      --amber-dim: #A87324;
+      --cyan: #6FD0E3;
+      --signal: #FF5E5B;
+      --moss: #4FAE7A;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: "JetBrains Mono", ui-monospace, "Courier New", monospace;
+      font-size: 14px;
+      color: var(--phosphor);
+      background:
+        radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%),
+        var(--bg);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+    }
+    /* CRT scanlines */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(159,232,176,0.04) 0,
+        rgba(159,232,176,0.04) 1px,
+        transparent 1px,
+        transparent 3px
+      );
+      mix-blend-mode: overlay;
+    }
+    /* Dot grid */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.4;
+      background-image: radial-gradient(circle, var(--phosphor-faint) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    ::selection {
+      background: var(--amber);
+      color: var(--bg);
+    }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { color: var(--amber); }
+
+    /* ---- Layout ---- */
+    .shell {
+      position: relative;
+      z-index: 1;
+      width: min(1140px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 0 0 40px;
+    }
+
+    /* ---- Masthead ---- */
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--hairline);
+      padding: 14px 0;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.35em;
+    }
+    .masthead-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .masthead-name {
+      color: var(--phosphor);
+      font-weight: 700;
+    }
+    .masthead-status {
+      color: var(--moss);
+    }
+    .masthead-right {
+      color: var(--phosphor-dim);
+    }
+
+    /* ---- Hero ---- */
+    .hero {
+      padding: 56px 0 0;
+    }
+    .hero-boot {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.35em;
+      color: var(--phosphor-dim);
+    }
+    .cursor {
+      animation: blink 1.1s step-end infinite;
+      color: var(--amber);
+    }
+    h1 {
+      margin-top: 28px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: clamp(2.6rem, 7vw, 5.5rem);
+      font-weight: 700;
+      line-height: 0.95;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+    }
+    .h1-glow {
+      color: var(--phosphor);
+      text-shadow: 0 0 20px rgba(159,232,176,0.35), 0 0 60px rgba(159,232,176,0.1);
+    }
+    .h1-amber {
+      color: var(--amber);
+      text-shadow: 0 0 20px rgba(255,179,71,0.4), 0 0 60px rgba(255,179,71,0.12);
+    }
+    .h1-dim {
+      color: var(--phosphor-dim);
+    }
+    .lede {
+      margin-top: 32px;
+      max-width: 38rem;
+      font-size: 0.9rem;
+      line-height: 1.75;
+      color: var(--phosphor-dim);
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-top: 32px;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+    }
+    .cta-primary {
+      display: inline-block;
+      padding: 14px 22px;
+      border: 1px solid var(--amber);
+      background: rgba(255,179,71,0.05);
+      color: var(--amber);
+      text-decoration: none;
+      font-family: inherit;
+      font-size: inherit;
+      letter-spacing: inherit;
+    }
+    .cta-primary:hover {
+      background: rgba(255,179,71,0.12);
+      text-shadow: 0 0 10px rgba(255,179,71,0.5);
+      color: var(--amber);
+    }
+    .cta-secondary {
+      display: inline-block;
+      padding: 14px 22px;
+      border: 1px solid var(--phosphor-dim);
+      color: var(--phosphor);
+      text-decoration: none;
+      font-family: inherit;
+      font-size: inherit;
+      letter-spacing: inherit;
+    }
+    .cta-secondary:hover {
+      border-color: var(--phosphor);
+      background: rgba(159,232,176,0.06);
+      text-shadow: 0 0 10px rgba(159,232,176,0.35);
+      color: var(--phosphor);
+    }
+
+    /* ---- Chat Mockup ---- */
+    .mockup-section {
+      margin-top: 48px;
+    }
+    .mockup {
+      border: 1px solid var(--hairline);
+      background: var(--bg-2);
+      font-size: 0.72rem;
+      line-height: 1.7;
+    }
+    .mockup-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--hairline);
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-dim);
+    }
+    .mockup-bar .online {
+      color: var(--moss);
+    }
+    .mockup-body {
+      padding: 12px 16px;
+    }
+    .msg {
+      padding: 4px 0;
+    }
+    .msg-name {
+      color: var(--cyan);
+    }
+    .msg-name-you {
+      color: var(--amber);
+    }
+    .msg-text {
+      color: var(--phosphor);
+    }
+    .msg-dim {
+      color: var(--phosphor-dim);
+    }
+    .mockup-input {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--hairline);
+      color: var(--phosphor-dim);
+      background: var(--bg);
+    }
+    .mockup-footer {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-faint);
+    }
+
+    /* ---- Value Cards ---- */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      margin-top: 56px;
+      border: 1px solid var(--hairline);
+    }
+    .card {
+      padding: 28px 24px;
+      border-right: 1px solid var(--hairline);
+    }
+    .card:last-child {
+      border-right: 0;
+    }
+    .card-tag {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-faint);
+    }
+    .card h2 {
+      margin-top: 10px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--phosphor);
+    }
+    .card p {
+      margin-top: 12px;
+      font-size: 0.82rem;
+      line-height: 1.7;
+      color: var(--phosphor-dim);
+    }
+
+    /* ---- Network ---- */
+    .network {
+      margin-top: 56px;
+      padding: 40px 40px;
+      border: 1px solid var(--hairline);
+      border-left: 3px solid var(--amber);
+      background: var(--bg-2);
+    }
+    .network-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-dim);
+    }
+    .network-body {
+      margin-top: 20px;
+    }
+    .network-body p {
+      font-size: 1.1rem;
+      font-style: italic;
+      line-height: 1.65;
+      color: var(--phosphor);
+      margin-bottom: 10px;
+    }
+    .network-body .n-amber {
+      color: var(--amber);
+      text-shadow: 0 0 8px rgba(255,179,71,0.3);
+    }
+
+    /* ---- Manifesto ---- */
+    .manifesto {
+      margin-top: 56px;
+      border-top: 1px solid var(--hairline);
+      padding: 56px 0;
+    }
+    .manifesto-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-dim);
+    }
+    .manifesto-body {
+      margin-top: 24px;
+      max-width: 42rem;
+    }
+    .manifesto-body p {
+      font-size: 1.2rem;
+      font-style: italic;
+      line-height: 1.65;
+      color: var(--phosphor);
+      margin-bottom: 16px;
+    }
+    .manifesto-body .m-amber {
+      color: var(--amber);
+      text-shadow: 0 0 8px rgba(255,179,71,0.3);
+    }
+    .manifesto-body .m-dim {
+      color: var(--phosphor-dim);
+    }
+
+    /* ---- Steps ---- */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      margin-top: 0;
+      border: 1px solid var(--hairline);
+      border-top: 0;
+    }
+    .step {
+      padding: 24px;
+      border-right: 1px solid var(--hairline);
+    }
+    .step:last-child {
+      border-right: 0;
+    }
+    .step-num {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      color: var(--phosphor-faint);
+    }
+    .step h3 {
+      margin-top: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--phosphor);
+    }
+    .step p {
+      margin-top: 10px;
+      font-size: 0.78rem;
+      line-height: 1.7;
+      color: var(--phosphor-dim);
+    }
+
+    /* ---- Technical strip ---- */
+    .tech-strip {
+      margin-top: 56px;
+      padding: 18px 24px;
+      border: 1px solid var(--hairline);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      color: var(--phosphor-faint);
+    }
+    .tech-endpoints {
+      display: flex;
+      gap: 16px;
+    }
+    .endpoint {
+      color: var(--phosphor-dim);
+    }
+    .endpoint span {
+      color: var(--amber-dim);
+    }
+
+    /* ---- Footer ---- */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 16px;
+      padding: 16px 0;
+      border-top: 1px solid var(--hairline);
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.25em;
+      color: var(--phosphor-faint);
+    }
+    .footer a {
+      color: var(--cyan);
+    }
+    .footer a:hover {
+      color: var(--amber);
+    }
+
+    /* ---- Animations ---- */
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 860px) {
+      .cards, .steps {
+        grid-template-columns: 1fr;
+      }
+      .card, .step {
+        border-right: 0;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .card:last-child, .step:last-child {
+        border-bottom: 0;
+      }
+      .tech-strip {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .footer {
+        flex-direction: column;
+        gap: 8px;
+      }
+    }
+    @media (max-width: 480px) {
+      .masthead {
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cta-row {
+        flex-direction: column;
+      }
+      .cta-primary, .cta-secondary {
+        text-align: center;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- Masthead -->
+    <div class="masthead">
+      <div class="masthead-left">
+        <span class="masthead-name">PANDO</span>
+        <span class="masthead-status">[ ONLINE ]</span>
+      </div>
+      <div class="masthead-right">encrypted terminal chat</div>
+    </div>
+
+    <!-- Hero -->
+    <section class="hero">
+      <p class="hero-boot">&gt; secure channel ready<span class="cursor">_</span></p>
+      <h1>
+        <span class="h1-glow">SPEAK</span><br>
+        <span class="h1-amber">FREELY.</span><br>
+        <span class="h1-dim">STAY PRIVATE.</span>
+      </h1>
+      <p class="lede">Pando is encrypted chat for the people you care about. No accounts. No phone numbers. No one listening in. Just you, your words, and the person you trust &mdash; across any distance.</p>
+      <div class="cta-row">
+        <a class="cta-primary" href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer">[ &gt; GET STARTED ]</a>
+        <a class="cta-secondary" href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:8px;">
+          <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          [ SOURCE CODE ]
+        </a>
+      </div>
+    </section>
+
+    <!-- Chat mockup -->
+    <section class="mockup-section">
+      <div class="mockup">
+        <div class="mockup-bar">
+          <span>pando v0.1 // encrypted session</span>
+          <span class="online">[ SECURE ]</span>
+        </div>
+        <div class="mockup-body">
+          <div class="msg"><span class="msg-name">alice</span> <span class="msg-dim">&gt;</span> <span class="msg-text">hey, are you safe?</span></div>
+          <div class="msg"><span class="msg-name-you">you</span> &nbsp;&nbsp;<span class="msg-dim">&gt;</span> <span class="msg-text">yes. made it across. using pando now</span></div>
+          <div class="msg"><span class="msg-name">alice</span> <span class="msg-dim">&gt;</span> <span class="msg-text">good. don't use the other app anymore</span></div>
+          <div class="msg"><span class="msg-name">alice</span> <span class="msg-dim">&gt;</span> <span class="msg-text">they read everything on there</span></div>
+          <div class="msg"><span class="msg-name-you">you</span> &nbsp;&nbsp;<span class="msg-dim">&gt;</span> <span class="msg-text">i know. that's why i'm here.</span></div>
+          <div class="msg"><span class="msg-name">alice</span> <span class="msg-dim">&gt;</span> <span class="msg-dim">...</span></div>
+          <div class="msg"><span class="msg-name">alice</span> <span class="msg-dim">&gt;</span> <span class="msg-text">i'm glad you're okay.</span></div>
+        </div>
+        <div class="mockup-input">&gt; <span class="cursor">_</span></div>
+      </div>
+      <p class="mockup-footer">terminal-native / end-to-end encrypted / no metadata</p>
+    </section>
+
+    <!-- Value Cards -->
+    <section class="cards">
+      <article class="card">
+        <div class="card-tag">01 // privacy</div>
+        <h2>Nobody In The Middle</h2>
+        <p>Your messages are encrypted before they leave your device. The server that delivers them cannot read them. No company, no government, no one but you and the person you're talking to.</p>
+      </article>
+      <article class="card">
+        <div class="card-tag">02 // freedom</div>
+        <h2>No Walls. No Gates.</h2>
+        <p>No app store approval. No phone number required. No account to freeze or suspend. Pando runs in your terminal &mdash; the one place they forgot to lock down.</p>
+      </article>
+      <article class="card">
+        <div class="card-tag">03 // connection</div>
+        <h2>Reach Who Matters</h2>
+        <p>Messages wait for your contact to come online. Even if they disconnect, even if the network drops &mdash; your words arrive when they return. Reliable delivery for unreliable times.</p>
+      </article>
+    </section>
+
+    <!-- How it works -->
+    <section class="steps">
+      <div class="step">
+        <div class="step-num">step 01 //</div>
+        <h3>Initialize</h3>
+        <p>Create your identity on your own machine. Your encryption keys are generated locally and never leave your device.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">step 02 //</div>
+        <h3>Exchange</h3>
+        <p>Share an invite with someone you trust. Verify each other's identity through a secure fingerprint before you start.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">step 03 //</div>
+        <h3>Talk</h3>
+        <p>Open your terminal and start talking. Every message is encrypted end-to-end. Always. No exceptions.</p>
+      </div>
+    </section>
+
+    <!-- Network -->
+    <section class="network">
+      <p class="network-label">&gt; /network // how it works</p>
+      <div class="network-body">
+        <p>there is no central server.</p>
+        <p>a relay is just a machine someone chose to run.</p>
+        <p>it could be a friend. a community. you.</p>
+        <p>most people just connect to one they trust &mdash;<br>point pando at its address and you're in.</p>
+        <p class="n-amber">nobody owns the network. nobody can.</p>
+        <p>and the relay you connect to? it can't read your messages.<br>it only sees encrypted noise. not words. not names. nothing.</p>
+      </div>
+    </section>
+
+    <!-- Manifesto -->
+    <section class="manifesto">
+      <p class="manifesto-label">&gt; /signal // why this exists</p>
+      <div class="manifesto-body">
+        <p>&ldquo;the right to a private conversation is not a feature.</p>
+        <p>it is a prerequisite for free thought.</p>
+        <p>every message you send through conventional channels is stored, analyzed, and indexed. your relationships become data points. your words become evidence.</p>
+        <p class="m-amber">pando exists because some conversations are nobody's business but yours.</p>
+        <p>not ours. not theirs. yours.</p>
+        <p class="m-dim">we built this for people who need to speak freely to the people they love &mdash; across borders, across the distance between what is allowed and what is right.&rdquo;</p>
+      </div>
+    </section>
+
+    <!-- Technical strip -->
+    <div class="tech-strip">
+      <span>relay endpoints</span>
+      <div class="tech-endpoints">
+        <span class="endpoint"><span>WS</span> /ws</span>
+        <span class="endpoint"><span>HEALTH</span> /up</span>
+        <span class="endpoint"><span>PROBE</span> /healthz</span>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span>pando &mdash; private terminal chat</span>
+      <a href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:8px;">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        elpdev/pando
+      </a>
+    </div>
+
+  </div>
+</body>
+</html>
