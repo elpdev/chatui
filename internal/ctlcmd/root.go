@@ -1,6 +1,7 @@
 package ctlcmd
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -17,7 +18,7 @@ import (
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device> [flags]")
+		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device|eject> [flags]")
 	}
 
 	switch args[0] {
@@ -49,6 +50,8 @@ func Execute(args []string) error {
 		return runCompleteEnrollment(args[1:])
 	case "revoke-device":
 		return runRevokeDevice(args[1:])
+	case "eject":
+		return runEject(args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -478,6 +481,38 @@ func runRevokeDevice(args []string) error {
 		return err
 	}
 	fmt.Printf("revoked device %s\n", *deviceID)
+	return nil
+}
+
+func runEject(args []string) error {
+	fs := flag.NewFlagSet("eject", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	dataDir := fs.String("data-dir", "", "client state directory")
+	force := fs.Bool("force", false, "skip confirmation prompt")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	if err != nil {
+		return err
+	}
+	if !*force {
+		fmt.Fprintf(os.Stderr, "This will permanently delete all local Pando data for mailbox %q at %s.\n", *mailbox, resolvedDataDir)
+		fmt.Fprintf(os.Stderr, "Type the mailbox name to confirm: ")
+		reader := bufio.NewReader(os.Stdin)
+		input, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return fmt.Errorf("read confirmation: %w", readErr)
+		}
+		if strings.TrimSpace(input) != *mailbox {
+			return fmt.Errorf("aborted")
+		}
+	}
+	if err := os.RemoveAll(resolvedDataDir); err != nil {
+		return fmt.Errorf("eject %s: %w", resolvedDataDir, err)
+	}
+	fmt.Printf("ejected local Pando data for %s\n", *mailbox)
 	return nil
 }
 
