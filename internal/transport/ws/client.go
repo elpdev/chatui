@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -40,8 +41,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	if c.token != "" {
 		headers.Set(authHeader, c.token)
 	}
-	conn, _, err := dialer.DialContext(ctx, c.url, headers)
+	conn, resp, err := dialer.DialContext(ctx, c.url, headers)
 	if err != nil {
+		if errors.Is(err, websocket.ErrBadHandshake) && resp != nil && resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("%w: check relay token", transport.ErrUnauthorized)
+		}
 		return err
 	}
 
