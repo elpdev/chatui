@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -79,6 +81,37 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 	}
 	if incoming.Incoming == nil || incoming.Incoming.Body != "live hello" {
 		t.Fatalf("unexpected incoming payload: %+v", incoming.Incoming)
+	}
+}
+
+func TestLandingPageExplainsRelay(t *testing.T) {
+	server := newTestServer(t)
+
+	resp, err := http.Get(server.URL + "/")
+	if err != nil {
+		t.Fatalf("get landing page: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read landing page body: %v", err)
+	}
+	content := string(body)
+
+	for _, want := range []string{
+		"This Is The Relay.",
+		"Pando Relay is the server that Pando clients connect to.",
+		"/ws",
+		"/up",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("landing page missing %q", want)
+		}
 	}
 }
 

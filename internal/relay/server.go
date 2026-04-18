@@ -313,28 +313,28 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
   <div class="shell">
     <div class="masthead">
       <span>Pando Relay Node</span>
-      <span>Encrypted transport / live mailbox broker / terminal native</span>
+      <span>Terminal chat relay / websocket transport / durable mailbox queue</span>
     </div>
 
     <section class="frame hero">
       <div class="hero-copy">
-        <div class="kicker">Retro-futurist relay surface</div>
-        <h1>Ship Signal Through The Static.</h1>
-        <p class="lede">Pando Relay is the network edge for encrypted terminal-native messaging. This host accepts WebSocket traffic, queues offline mail, and keeps peer delivery moving through a hardened low-friction transport layer.</p>
+        <div class="kicker">Encrypted messaging infrastructure</div>
+        <h1>This Is The Relay.</h1>
+        <p class="lede">Pando Relay is the server that Pando clients connect to. It accepts WebSocket connections, routes encrypted envelopes between mailbox IDs, and stores messages for offline recipients until they reconnect.</p>
         <div class="cta-row">
           <div class="chip"><strong>WS</strong> <code>/ws</code></div>
           <div class="chip"><strong>UP</strong> <code>/up</code></div>
-          <div class="chip"><strong>MODE</strong> public relay</div>
+          <div class="chip"><strong>ROOT</strong> info only</div>
           <a class="chip" href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer"><strong>GH</strong> source</a>
         </div>
       </div>
 
       <aside class="hero-panel">
         <div>
-          <div class="panel-label">Relay status</div>
+          <div class="panel-label">What this host does</div>
           <div class="status-box">
-            <strong>Online / accepting traffic</strong>
-            <p>Use the health endpoint for probes and connect clients over the websocket transport. Root is now reserved for this landing surface instead of a blank proxy-style 404.</p>
+            <strong>Online / ready for clients</strong>
+            <p>Use <code>/ws</code> for messaging traffic and <code>/up</code> or <code>/healthz</code> for probes. The relay handles delivery and queueing, but encrypted message contents remain opaque to the server.</p>
           </div>
         </div>
 
@@ -344,29 +344,36 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 
     <section class="grid">
       <article class="card">
-        <div class="section-label">Transport</div>
-        <h2>WebSocket ingress</h2>
-        <p>Encrypted envelope traffic enters through a persistent websocket endpoint designed for durable relay handoff and reconnect-friendly clients.</p>
+        <div class="section-label">Connect</div>
+        <h2>Use the websocket endpoint</h2>
+        <p>This page is documentation, not the chat app. Pando clients subscribe to a mailbox and publish encrypted envelopes over the relay websocket.</p>
         <div class="code-row"><code>GET /ws</code></div>
       </article>
 
       <article class="card">
-        <div class="section-label">Health</div>
-        <h2>Probe friendly</h2>
-        <p>Operational checks should target the minimal health endpoint so deploy orchestration and tunnels can verify that the relay is actually live.</p>
-        <div class="code-row"><code>GET /up</code></div>
+        <div class="section-label">Delivery</div>
+        <h2>Queue mail for offline peers</h2>
+        <p>If a recipient is offline, the relay keeps their encrypted envelopes in durable storage and delivers them when that mailbox reconnects.</p>
+        <div class="code-row"><code>durable mailbox queue</code></div>
       </article>
 
       <article class="card">
-        <div class="section-label">Queue</div>
-        <h2>Mailbox buffering</h2>
-        <p>Offline delivery stays durable through the on-disk relay store, allowing clients to reconnect and drain pending messages when they come back online.</p>
-        <div class="code-row"><code>/storage/relay.db</code></div>
+        <div class="section-label">Privacy</div>
+        <h2>Relay transport, not decryption</h2>
+        <p>Pando uses end-to-end encryption for chat messages. The relay sees mailbox identifiers and ciphertext, but it is not the place where conversations are read.</p>
+        <div class="code-row"><code>opaque encrypted envelopes</code></div>
+      </article>
+
+      <article class="card">
+        <div class="section-label">Health</div>
+        <h2>Probe the relay</h2>
+        <p>Use the health endpoint for load balancers, uptime checks, and deployment probes. It confirms the relay is reachable without opening a websocket session.</p>
+        <div class="code-row"><code>GET /up</code></div>
       </article>
     </section>
 
     <div class="footer">
-      <span>Built for terminal-native encrypted messaging</span>
+      <span>Built for terminal-native encrypted messaging with offline delivery</span>
       <span><a href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer">github.com/elpdev/pando</a></span>
     </div>
   </div>
