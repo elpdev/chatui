@@ -63,6 +63,8 @@ jobs:
         id: version
         shell: bash
         run: |
+          major_regex='^[a-zA-Z]+(\([^)]+\))?!:'
+          minor_regex='^feat(\([^)]+\))?:'
           latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
           if [[ -z "$latest_tag" ]]; then
             current_major=0
@@ -80,11 +82,11 @@ jobs:
           bump="patch"
           while IFS= read -r commit; do
             [[ -z "$commit" ]] && continue
-            if [[ "$commit" == *"BREAKING CHANGE:"* ]] || [[ "$commit" =~ ^[a-zA-Z]+(\([^)]+\))?!: ]]; then
+            if [[ "$commit" == *"BREAKING CHANGE:"* ]] || [[ "$commit" =~ $major_regex ]]; then
               bump="major"
               break
             fi
-            if [[ "$commit" =~ ^feat(\([^)]+\))?: ]]; then
+            if [[ "$commit" =~ $minor_regex ]]; then
               bump="minor"
             fi
           done < <(git log --format='%s%n%b' "$commit_range")
