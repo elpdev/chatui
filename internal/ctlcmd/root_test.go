@@ -2,6 +2,10 @@ package ctlcmd
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +13,7 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
+	"rsc.io/qr"
 )
 
 func TestEjectForce(t *testing.T) {
@@ -218,6 +223,45 @@ func TestRunInviteCodeRaw(t *testing.T) {
 	})
 	if strings.TrimSpace(output) != code {
 		t.Fatalf("expected raw invite output %q, got %q", code, strings.TrimSpace(output))
+	}
+}
+
+func TestReadInviteBundleFromQRImage(t *testing.T) {
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	code, err := encodeInviteCode(id.InviteBundle())
+	if err != nil {
+		t.Fatalf("encode invite code: %v", err)
+	}
+	qrCode, err := qr.Encode(code, qr.L)
+	if err != nil {
+		t.Fatalf("encode QR image: %v", err)
+	}
+	qrCode.Scale = 12
+	qrImage := qrCode.Image()
+	padded := image.NewRGBA(image.Rect(0, 0, qrImage.Bounds().Dx()+80, qrImage.Bounds().Dy()+80))
+	draw.Draw(padded, padded.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(padded, image.Rect(40, 40, 40+qrImage.Bounds().Dx(), 40+qrImage.Bounds().Dy()), qrImage, image.Point{}, draw.Src)
+	path := filepath.Join(t.TempDir(), "invite.png")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create qr file: %v", err)
+	}
+	if err := png.Encode(file, padded); err != nil {
+		t.Fatalf("write qr image: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close qr file: %v", err)
+	}
+
+	bundle, err := readInviteBundle(inviteInputOptions{QRImagePath: path})
+	if err != nil {
+		t.Fatalf("read invite bundle from qr image: %v", err)
+	}
+	if bundle.AccountID != id.AccountID {
+		t.Fatalf("expected account %q, got %q", id.AccountID, bundle.AccountID)
 	}
 }
 

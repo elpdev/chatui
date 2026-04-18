@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"regexp"
@@ -15,6 +16,11 @@ import (
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
+	"github.com/makiuchi-d/gozxing"
+	gozxingqr "github.com/makiuchi-d/gozxing/qrcode"
+	qrterminal "github.com/mdp/qrterminal/v3"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 func Execute(args []string) error {
@@ -138,8 +144,12 @@ func runInviteCode(args []string) error {
 	dataDir := fs.String("data-dir", "", "client state directory")
 	copyToClipboard := fs.Bool("copy", false, "copy the invite code to the clipboard")
 	rawOutput := fs.Bool("raw", false, "print only the invite code")
+	qrOutput := fs.Bool("qr", false, "render the invite code as a terminal QR code")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *rawOutput && *qrOutput {
+		return fmt.Errorf("use only one of -raw or -qr")
 	}
 	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
@@ -162,6 +172,13 @@ func runInviteCode(args []string) error {
 	}
 	if *rawOutput {
 		fmt.Println(code)
+		return nil
+	}
+	if *qrOutput {
+		fmt.Printf("account: %s\n", id.AccountID)
+		fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+		qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stdout)
+		fmt.Println("scan this QR or import a saved image with pandoctl add-contact --qr-image <path>")
 		return nil
 	}
 	fmt.Printf("account: %s\n", id.AccountID)
@@ -190,6 +207,7 @@ func runImportContactWithName(name string, args []string) error {
 	readStdin := fs.Bool("stdin", false, "read invite code or invite JSON from stdin")
 	readPaste := fs.Bool("paste", false, "read a pasted invite from stdin until EOF")
 	fromClipboard := fs.Bool("from-clipboard", false, "read the invite code from the clipboard")
+	qrImagePath := fs.String("qr-image", "", "path to a QR image containing an invite code")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -197,7 +215,7 @@ func runImportContactWithName(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateInviteInputFlags(*invitePath, *inviteCode, *readStdin, *readPaste, *fromClipboard); err != nil {
+	if err := validateInviteInputFlags(*invitePath, *inviteCode, *readStdin, *readPaste, *fromClipboard, *qrImagePath); err != nil {
 		return err
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
@@ -211,6 +229,7 @@ func runImportContactWithName(name string, args []string) error {
 		ReadStdin:     *readStdin,
 		ReadPaste:     *readPaste,
 		ReadClipboard: *fromClipboard,
+		QRImagePath:   *qrImagePath,
 	})
 	if err != nil {
 		return err
@@ -235,9 +254,10 @@ type inviteInputOptions struct {
 	ReadStdin     bool
 	ReadPaste     bool
 	ReadClipboard bool
+	QRImagePath   string
 }
 
-func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPaste, fromClipboard bool) error {
+func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPaste, fromClipboard bool, qrImagePath string) error {
 	inputs := 0
 	if strings.TrimSpace(invitePath) != "" {
 		inputs++
@@ -254,11 +274,14 @@ func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPast
 	if fromClipboard {
 		inputs++
 	}
+	if strings.TrimSpace(qrImagePath) != "" {
+		inputs++
+	}
 	if inputs == 0 {
-		return fmt.Errorf("provide one of -invite, -code, -stdin, -paste, or -from-clipboard")
+		return fmt.Errorf("provide one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
 	}
 	if inputs > 1 {
-		return fmt.Errorf("use only one of -invite, -code, -stdin, -paste, or -from-clipboard")
+		return fmt.Errorf("use only one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
 	}
 	return nil
 }
@@ -646,6 +669,8 @@ func readInviteBundle(input inviteInputOptions) (*identity.InviteBundle, error) 
 			return nil, fmt.Errorf("read invite from clipboard: %w", err)
 		}
 		return decodeInviteText(text)
+	case strings.TrimSpace(input.QRImagePath) != "":
+		return readInviteBundleFromQRImage(input.QRImagePath)
 	case input.ReadStdin || input.ReadPaste || input.InvitePath == "-":
 		if input.ReadPaste {
 			fmt.Fprintln(os.Stderr, "paste the invite, then press Ctrl-D when finished:")
@@ -662,8 +687,29 @@ func readInviteBundle(input inviteInputOptions) (*identity.InviteBundle, error) 
 		}
 		return decodeInviteText(string(bytes))
 	default:
-		return nil, fmt.Errorf("provide one of -invite, -code, -stdin, -paste, or -from-clipboard")
+		return nil, fmt.Errorf("provide one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
 	}
+}
+
+func readInviteBundleFromQRImage(path string) (*identity.InviteBundle, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open QR image: %w", err)
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, fmt.Errorf("decode QR image: %w", err)
+	}
+	bitmap, err := gozxing.NewBinaryBitmapFromImage(img)
+	if err != nil {
+		return nil, fmt.Errorf("read QR image: %w", err)
+	}
+	result, err := gozxingqr.NewQRCodeReader().Decode(bitmap, nil)
+	if err != nil {
+		return nil, fmt.Errorf("read QR image: %w", err)
+	}
+	return decodeInviteText(result.GetText())
 }
 
 func decodeInviteText(text string) (*identity.InviteBundle, error) {
