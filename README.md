@@ -7,6 +7,18 @@
 
 Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through a self-hosted relay.
 
+## Install
+
+Install all three binaries to your `$GOPATH/bin`:
+
+```bash
+go install github.com/elpdev/pando/cmd/pando@latest
+go install github.com/elpdev/pando/cmd/pando-relay@latest
+go install github.com/elpdev/pando/cmd/pandoctl@latest
+```
+
+Or download pre-built binaries for Linux, macOS, and Windows from the [latest release](https://github.com/elpdev/pando/releases/latest).
+
 ## Run
 
 Start the relay:
