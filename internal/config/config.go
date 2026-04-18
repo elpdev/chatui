@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,4 +94,50 @@ func RelayStorePath() string {
 		return filepath.Join(".", ".pando", "relay.db")
 	}
 	return filepath.Join(home, ".local", "share", "pando", "relay.db")
+}
+
+func ApplyRelayEnv(cfg *Relay) error {
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_ADDR"); ok {
+		cfg.Addr = value
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_STORE_PATH"); ok {
+		cfg.StorePath = value
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_AUTH_TOKEN"); ok {
+		cfg.AuthToken = value
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_QUEUE_TTL"); ok {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_QUEUE_TTL %q: %w", value, err)
+		}
+		cfg.QueueTTL = parsed
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_MAX_MESSAGE_BYTES"); ok {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_MAX_MESSAGE_BYTES %q: %w", value, err)
+		}
+		cfg.MaxMessageBytes = parsed
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_RATE_LIMIT_PER_MINUTE"); ok {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_RATE_LIMIT_PER_MINUTE %q: %w", value, err)
+		}
+		cfg.RateLimitPerMinute = parsed
+	}
+	return nil
+}
+
+func lookupEnvTrimmed(key string) (string, bool) {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }

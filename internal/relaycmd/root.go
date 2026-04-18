@@ -15,6 +15,9 @@ import (
 
 func Execute(args []string) error {
 	cfg := config.DefaultRelay()
+	if err := config.ApplyRelayEnv(&cfg); err != nil {
+		return fmt.Errorf("invalid relay environment: %w", err)
+	}
 	fs := flag.NewFlagSet("pando-relay", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "HTTP listen address")

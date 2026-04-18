@@ -48,6 +48,27 @@ Start the relay:
 go run ./cmd/pando-relay
 ```
 
+Relay runtime settings can also come from environment variables, which is useful for container deployments:
+
+```bash
+export PANDO_RELAY_AUTH_TOKEN="your-shared-secret"
+export PANDO_RELAY_ADDR=":8080"
+go run ./cmd/pando-relay
+```
+
+Supported relay environment variables:
+
+- `PANDO_RELAY_AUTH_TOKEN`
+- `PANDO_RELAY_ADDR`
+- `PANDO_RELAY_STORE_PATH`
+- `PANDO_RELAY_QUEUE_TTL`
+- `PANDO_RELAY_MAX_MESSAGE_BYTES`
+- `PANDO_RELAY_RATE_LIMIT_PER_MINUTE`
+
+CLI flags still work and take precedence over environment variables.
+
+If an environment variable has an invalid value, the relay now fails startup with an explicit error instead of silently falling back to defaults.
+
 ## ONCE Packaging
 
 The relay is packaged to fit ONCE's expected runtime shape.
@@ -129,6 +150,13 @@ Optional hardening flags:
 
 ```bash
 go run ./cmd/pando-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120 --auth-token secret-token
+```
+
+Or set the auth token through the environment so every connection is required to present it:
+
+```bash
+export PANDO_RELAY_AUTH_TOKEN="secret-token"
+go run ./cmd/pando-relay
 ```
 
 Initialize Alice and Bob locally and exchange invite codes:
