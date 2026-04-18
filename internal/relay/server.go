@@ -193,6 +193,10 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
       color: var(--amber);
       font-weight: 700;
     }
+    .chip:hover {
+      border-color: rgba(124, 245, 214, 0.45);
+      background: rgba(124, 245, 214, 0.1);
+    }
     .hero-panel {
       display: flex;
       flex-direction: column;
@@ -280,6 +284,13 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
       text-transform: uppercase;
       letter-spacing: 0.18em;
     }
+    .footer a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+    .footer a:hover {
+      color: var(--phosphor);
+    }
     @media (max-width: 860px) {
       .hero {
         grid-template-columns: 1fr;
@@ -314,6 +325,7 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
           <div class="chip"><strong>WS</strong> <code>/ws</code></div>
           <div class="chip"><strong>UP</strong> <code>/up</code></div>
           <div class="chip"><strong>MODE</strong> public relay</div>
+          <a class="chip" href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer"><strong>GH</strong> source</a>
         </div>
       </div>
 
@@ -355,7 +367,7 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 
     <div class="footer">
       <span>Built for terminal-native encrypted messaging</span>
-      <span>Pando / Once / Cloudflare Tunnel</span>
+      <span><a href="https://github.com/elpdev/pando" target="_blank" rel="noreferrer">github.com/elpdev/pando</a></span>
     </div>
   </div>
 </body>
