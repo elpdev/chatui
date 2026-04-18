@@ -35,6 +35,7 @@ type Model struct {
 	connecting       bool
 	disconnected     bool
 	connected        bool
+	authFailed       bool
 	reconnectAttempt int
 	peerFingerprint  string
 	peerVerified     bool
@@ -107,6 +108,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			if body == "" {
 				return m, nil
 			}
+			if m.authFailed {
+				m.status = "cannot send: relay auth failed; restart with --relay-token"
+				return m, nil
+			}
 			if !m.connected {
 				m.status = "relay is not connected; waiting to reconnect"
 				return m, nil
@@ -124,6 +129,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	case clientEventMsg:
 		event := transport.Event(msg)
 		if event.Err != nil {
+			if transport.IsUnauthorized(event.Err) {
+				m.handleAuthFailure(event.Err)
+				return m, nil
+			}
 			m.status = fmt.Sprintf("disconnected: %v", event.Err)
 			m.disconnected = true
 			m.connected = false
@@ -135,6 +144,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, m.waitForEvent()
 	case reconnectResultMsg:
 		if msg.err != nil {
+			if transport.IsUnauthorized(msg.err) {
+				m.handleAuthFailure(msg.err)
+				return m, nil
+			}
 			m.disconnected = true
 			m.connected = false
 			return m, m.reconnectCmd()
@@ -183,8 +196,10 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		if m.connecting {
 			m.connecting = false
 			m.connected = true
+			m.authFailed = false
 			m.disconnected = false
 			m.reconnectAttempt = 0
+			m.input.Placeholder = "Type a message"
 			m.status = fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox)
 		}
 	case protocol.MessageTypeIncoming:
@@ -332,4 +347,13 @@ func verificationLabel(verified bool) string {
 		return "verified"
 	}
 	return "unverified"
+}
+
+func (m *Model) handleAuthFailure(err error) {
+	m.connecting = false
+	m.connected = false
+	m.disconnected = true
+	m.authFailed = true
+	m.status = fmt.Sprintf("relay auth failed: %v", err)
+	m.input.Placeholder = "Relay auth failed. Restart with --relay-token"
 }
