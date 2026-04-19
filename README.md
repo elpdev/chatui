@@ -64,11 +64,13 @@ pando-relay
 Initialize an identity and exchange contacts:
 
 ```bash
-pando identity init --mailbox alice
+pando identity init --mailbox alice --publish-directory
 pando identity invite-code --mailbox alice --copy
 pando contact add --mailbox alice --code '<bob-invite-code>'
 pando contact list --mailbox alice
 ```
+
+If you are connecting to a relay for the first time, publish your signed relay directory entry before starting the chat client. The easiest way is to do it during init with `pando identity init --publish-directory`. You can also publish later with `pando contact publish-directory --mailbox <mailbox>`.
 
 `pando contact add` now verifies the imported contact automatically. If you want to import without marking the contact trusted yet, use `pando contact import` and then run `pando contact verify` later.
 
@@ -121,7 +123,7 @@ By default, Pando stores all local data under `~/.pando`:
 You can override the shared storage root with `-root-dir`, which is useful if you want to keep your chats and relay data on a removable drive:
 
 ```bash
-pando identity init --mailbox alice --root-dir /media/usb/pando
+pando identity init --mailbox alice --root-dir /media/usb/pando --publish-directory
 pando --mailbox alice --to bob --root-dir /media/usb/pando
 pando-relay --root-dir /media/usb/pando
 ```
@@ -195,7 +197,7 @@ The `pando` binary handles both the TUI client and management subcommands:
 | Command | Description |
 |---|---|
 | `pando` | Start the TUI chat client |
-| `pando identity init` | Create a new identity for a mailbox |
+| `pando identity init` | Create a new identity for a mailbox (`--publish-directory` also publishes relay bootstrap state) |
 | `pando identity show` | Display identity details (fingerprint, devices) |
 | `pando identity invite-code` | Generate an invite code (`--raw`, `--copy`, `--qr`) |
 | `pando identity export-invite` | Export invite bundle to a JSON file |
@@ -204,6 +206,7 @@ The `pando` binary handles both the TUI client and management subcommands:
 | `pando contact list` | List all contacts |
 | `pando contact show` | Show contact details |
 | `pando contact verify` | Mark a contact as verified |
+| `pando contact publish-directory` | Publish the signed relay directory entry for a mailbox |
 | `pando device list` | List enrolled devices |
 | `pando device revoke` | Revoke a device |
 | `pando device enroll create` | Create an enrollment request for a new device |

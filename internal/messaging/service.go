@@ -22,8 +22,6 @@ type DirectoryClient interface {
 	LookupDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
 }
 
-const BodyEncodingContactUpdate = "contact-update-v1"
-
 const (
 	incomingAttachmentTTL             = 15 * time.Minute
 	maxPendingIncomingAttachments     = 128
@@ -188,13 +186,6 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		return nil, err
 	}
 
-	if envelope.BodyEncoding == BodyEncodingContactUpdate {
-		updated, err := s.applyContactUpdate(contact, envelope)
-		if err != nil {
-			return nil, err
-		}
-		return &IncomingResult{Control: true, PeerAccountID: updated.AccountID, ContactUpdated: updated}, nil
-	}
 	body, err := session.Decrypt(s.identity, contact, envelope)
 	if err != nil {
 		return nil, err
@@ -232,6 +223,12 @@ func (s *Service) resolveIncomingSender(senderMailbox string) (*identity.Contact
 
 func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *contentPayload) (*IncomingResult, bool, error) {
 	switch payload.Kind {
+	case contentKindContactUpdate:
+		updated, err := s.parseAndApplyContactUpdate(contact, payload)
+		if err != nil {
+			return nil, true, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, ContactUpdated: updated}, true, nil
 	case contentKindAttachmentChunk:
 		message, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
 		if err != nil {
@@ -302,38 +299,30 @@ func detectAttachmentMIMEType(filename string, bytes []byte, attachmentType stri
 }
 
 func (s *Service) contactUpdateEnvelopes(contact *identity.Contact) ([]protocol.Envelope, error) {
-	currentDevice, err := s.identity.CurrentDevice()
+	payload, err := json.Marshal(contentPayload{Kind: contentKindContactUpdate, ContactUpdate: &identity.InviteBundle{AccountID: s.identity.AccountID, AccountSigningPublic: append([]byte(nil), s.identity.AccountSigningPublic...), Devices: s.identity.DeviceBundles()}})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode contact update payload: %w", err)
 	}
-	bundleBytes, err := json.Marshal(s.identity.InviteBundle())
-	if err != nil {
-		return nil, fmt.Errorf("encode contact update bundle: %w", err)
+	if len(contact.ActiveDevices()) == 0 {
+		return nil, nil
 	}
-	devices := contact.ActiveDevices()
-	envelopes := make([]protocol.Envelope, 0, len(devices))
-	for _, device := range devices {
-		envelopes = append(envelopes, protocol.Envelope{
-			SenderMailbox:    currentDevice.Mailbox,
-			RecipientMailbox: device.Mailbox,
-			BodyEncoding:     BodyEncodingContactUpdate,
-			Body:             string(bundleBytes),
-		})
-	}
-	return envelopes, nil
+	return session.Encrypt(s.identity, contact, string(payload))
 }
 
-func (s *Service) applyContactUpdate(existing *identity.Contact, envelope protocol.Envelope) (*identity.Contact, error) {
-	var bundle identity.InviteBundle
-	if err := json.Unmarshal([]byte(envelope.Body), &bundle); err != nil {
-		return nil, fmt.Errorf("decode contact update bundle: %w", err)
+func (s *Service) parseAndApplyContactUpdate(existing *identity.Contact, payload *contentPayload) (*identity.Contact, error) {
+	if payload == nil || payload.ContactUpdate == nil {
+		return nil, fmt.Errorf("contact update payload is required")
 	}
+	return s.applyContactUpdate(existing, *payload.ContactUpdate)
+}
+
+func (s *Service) applyContactUpdate(existing *identity.Contact, bundle identity.InviteBundle) (*identity.Contact, error) {
 	updated, err := identity.ContactFromInvite(bundle)
 	if err != nil {
 		return nil, err
 	}
 	if existing.Fingerprint() != updated.Fingerprint() || existing.AccountID != updated.AccountID {
-		return nil, fmt.Errorf("contact update does not match stored identity for sender %s", envelope.SenderMailbox)
+		return nil, fmt.Errorf("contact update does not match stored identity for account %s", existing.AccountID)
 	}
 	updated.Verified = existing.Verified
 	updated.TrustSource = existing.TrustSource

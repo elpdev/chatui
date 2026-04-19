@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/google/uuid"
 )
 
 const (
 	contentKindText            = "text"
+	contentKindContactUpdate   = "contact-update"
 	contentKindAttachmentChunk = "attachment-chunk"
 	contentKindDeliveryAck     = "delivery-ack"
 	contentKindTyping          = "typing"
@@ -37,6 +39,7 @@ const (
 type contentPayload struct {
 	Kind            string                  `json:"kind"`
 	Text            string                  `json:"text,omitempty"`
+	ContactUpdate   *identity.InviteBundle  `json:"contact_update,omitempty"`
 	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
 	DeliveryAck     *deliveryAck            `json:"delivery_ack,omitempty"`
 	Typing          *typingIndicator        `json:"typing,omitempty"`

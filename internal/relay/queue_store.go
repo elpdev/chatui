@@ -17,6 +17,7 @@ import (
 
 var queueBucket = []byte("mailboxes")
 var mailboxClaimBucket = []byte("mailbox_claims")
+var mailboxDirectoryBucket = []byte("mailbox_directory_accounts")
 var directoryBucket = []byte("directory_entries")
 var rendezvousBucket = []byte("rendezvous_entries")
 
@@ -32,6 +33,7 @@ type QueueStore interface {
 	AuthorizeMailbox(mailbox string, signingPublic []byte) error
 	PutDirectoryEntry(relayapi.SignedDirectoryEntry) error
 	GetDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	LookupMailboxAccount(mailbox string) (string, error)
 	PutRendezvousPayload(id string, payload relayapi.RendezvousPayload) error
 	GetRendezvousPayloads(id string, now time.Time) ([]relayapi.RendezvousPayload, error)
 	DeleteRendezvous(id string) error
@@ -42,13 +44,14 @@ type MemoryQueueStore struct {
 	mu         sync.Mutex
 	mailboxes  map[string][]protocol.Envelope
 	claims     map[string][]byte
+	accounts   map[string]string
 	directory  map[string]relayapi.SignedDirectoryEntry
 	rendezvous map[string][]relayapi.RendezvousPayload
 	limits     QueueLimits
 }
 
 func NewMemoryQueueStore() *MemoryQueueStore {
-	return &MemoryQueueStore{mailboxes: make(map[string][]protocol.Envelope), claims: make(map[string][]byte), directory: make(map[string]relayapi.SignedDirectoryEntry), rendezvous: make(map[string][]relayapi.RendezvousPayload)}
+	return &MemoryQueueStore{mailboxes: make(map[string][]protocol.Envelope), claims: make(map[string][]byte), accounts: make(map[string]string), directory: make(map[string]relayapi.SignedDirectoryEntry), rendezvous: make(map[string][]relayapi.RendezvousPayload)}
 }
 
 func (s *MemoryQueueStore) SetLimits(limits QueueLimits) {
@@ -101,6 +104,9 @@ func (s *MemoryQueueStore) PutDirectoryEntry(entry relayapi.SignedDirectoryEntry
 	if ok && !bytes.Equal(existing.Entry.Bundle.AccountSigningPublic, entry.Entry.Bundle.AccountSigningPublic) {
 		return ErrDirectoryConflict
 	}
+	if err := syncMailboxOwnersMemory(s.claims, s.accounts, existing, entry); err != nil {
+		return err
+	}
 	s.directory[entry.Entry.Mailbox] = entry
 	return nil
 }
@@ -114,6 +120,16 @@ func (s *MemoryQueueStore) GetDirectoryEntry(mailbox string) (*relayapi.SignedDi
 	}
 	copyEntry := entry
 	return &copyEntry, nil
+}
+
+func (s *MemoryQueueStore) LookupMailboxAccount(mailbox string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	account, ok := s.accounts[mailbox]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return account, nil
 }
 
 func (s *MemoryQueueStore) PutRendezvousPayload(id string, payload relayapi.RendezvousPayload) error {
@@ -161,6 +177,10 @@ func NewBoltQueueStore(path string) (*BoltQueueStore, error) {
 			return err
 		}
 		_, err = tx.CreateBucketIfNotExists(mailboxClaimBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(mailboxDirectoryBucket)
 		if err != nil {
 			return err
 		}
@@ -251,9 +271,9 @@ func (s *BoltQueueStore) PutDirectoryEntry(entry relayapi.SignedDirectoryEntry) 
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(directoryBucket)
 		key := []byte(entry.Entry.Mailbox)
+		var current relayapi.SignedDirectoryEntry
 		existing := bucket.Get(key)
 		if len(existing) != 0 {
-			var current relayapi.SignedDirectoryEntry
 			if err := json.Unmarshal(existing, &current); err != nil {
 				return fmt.Errorf("decode directory entry: %w", err)
 			}
@@ -264,6 +284,9 @@ func (s *BoltQueueStore) PutDirectoryEntry(entry relayapi.SignedDirectoryEntry) 
 		bytes, err := json.Marshal(entry)
 		if err != nil {
 			return fmt.Errorf("encode directory entry: %w", err)
+		}
+		if err := syncMailboxOwnersBolt(tx, current, entry); err != nil {
+			return err
 		}
 		return bucket.Put(key, bytes)
 	})
@@ -286,6 +309,23 @@ func (s *BoltQueueStore) GetDirectoryEntry(mailbox string) (*relayapi.SignedDire
 		return nil, err
 	}
 	return &entry, nil
+}
+
+func (s *BoltQueueStore) LookupMailboxAccount(mailbox string) (string, error) {
+	var account string
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(mailboxDirectoryBucket)
+		value := bucket.Get([]byte(mailbox))
+		if len(value) == 0 {
+			return ErrNotFound
+		}
+		account = string(value)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return account, nil
 }
 
 func (s *BoltQueueStore) PutRendezvousPayload(id string, payload relayapi.RendezvousPayload) error {
@@ -378,4 +418,75 @@ func validateQueueLimits(queue []protocol.Envelope, next protocol.Envelope, limi
 		return ErrQueueFull
 	}
 	return nil
+}
+
+func syncMailboxOwnersMemory(claims map[string][]byte, accounts map[string]string, previous, next relayapi.SignedDirectoryEntry) error {
+	active := activeDirectoryDevices(next)
+	for mailbox, key := range active {
+		if existingAccount, ok := accounts[mailbox]; ok && existingAccount != next.Entry.Mailbox {
+			return ErrMailboxClaimConflict
+		}
+		if existingKey, ok := claims[mailbox]; ok && !bytes.Equal(existingKey, key) {
+			return ErrMailboxClaimConflict
+		}
+	}
+	for mailbox := range activeDirectoryDevices(previous) {
+		if accounts[mailbox] == previous.Entry.Mailbox {
+			delete(accounts, mailbox)
+			delete(claims, mailbox)
+		}
+	}
+	for mailbox, key := range active {
+		accounts[mailbox] = next.Entry.Mailbox
+		claims[mailbox] = append([]byte(nil), key...)
+	}
+	return nil
+}
+
+func syncMailboxOwnersBolt(tx *bbolt.Tx, previous, next relayapi.SignedDirectoryEntry) error {
+	claimBucket := tx.Bucket(mailboxClaimBucket)
+	accountBucket := tx.Bucket(mailboxDirectoryBucket)
+	active := activeDirectoryDevices(next)
+	for mailbox, key := range active {
+		if existingAccount := accountBucket.Get([]byte(mailbox)); len(existingAccount) != 0 && string(existingAccount) != next.Entry.Mailbox {
+			return ErrMailboxClaimConflict
+		}
+		existingKey := claimBucket.Get([]byte(mailbox))
+		if len(existingKey) != 0 && !bytes.Equal(existingKey, key) {
+			return ErrMailboxClaimConflict
+		}
+	}
+	for mailbox := range activeDirectoryDevices(previous) {
+		if existingAccount := accountBucket.Get([]byte(mailbox)); len(existingAccount) != 0 && string(existingAccount) == previous.Entry.Mailbox {
+			if err := accountBucket.Delete([]byte(mailbox)); err != nil {
+				return err
+			}
+			if err := claimBucket.Delete([]byte(mailbox)); err != nil {
+				return err
+			}
+		}
+	}
+	for mailbox, key := range active {
+		if err := accountBucket.Put([]byte(mailbox), []byte(next.Entry.Mailbox)); err != nil {
+			return err
+		}
+		if err := claimBucket.Put([]byte(mailbox), append([]byte(nil), key...)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func activeDirectoryDevices(entry relayapi.SignedDirectoryEntry) map[string][]byte {
+	devices := make(map[string][]byte)
+	if entry.Entry.Mailbox == "" {
+		return devices
+	}
+	for _, device := range entry.Entry.Bundle.Devices {
+		if device.Revoked {
+			continue
+		}
+		devices[device.Mailbox] = append([]byte(nil), device.SigningPublic...)
+	}
+	return devices
 }

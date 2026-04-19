@@ -24,6 +24,7 @@ func TestQueuedMessageDeliveredOnSubscribe(t *testing.T) {
 	defer publisher.Close()
 	_ = readChallenge(t, publisher)
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 
 	writeMessage(t, publisher, protocol.Message{
 		Type: protocol.MessageTypePublish,
@@ -60,6 +61,7 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 	subscriber := dialTestConn(t, server)
 	defer subscriber.Close()
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 	challenge := readChallenge(t, subscriber)
 	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
 	readMessage(t, subscriber)
@@ -94,6 +96,7 @@ func TestSubscriberPublishAckDoesNotBlockIncomingDelivery(t *testing.T) {
 	defer subscriber.Close()
 	_ = subscriber.SetReadDeadline(time.Now().Add(10 * time.Second))
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 	challenge := readChallenge(t, subscriber)
 	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
 	readMessage(t, subscriber)
@@ -154,6 +157,8 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 	server := newTestServer(t)
 	bobIdentity := mustIdentity(t, "bob")
 	malloryIdentity := mustIdentity(t, "mallory")
+	publishDirectoryEntry(t, server, bobIdentity)
+	publishDirectoryEntry(t, server, malloryIdentity)
 
 	first := dialTestConn(t, server)
 	defer first.Close()
@@ -172,8 +177,8 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
 		t.Fatalf("expected subscribe rejection, got %+v", msg)
 	}
-	if msg.Error.Message != genericClientError {
-		t.Fatalf("expected generic error, got %q", msg.Error.Message)
+	if msg.Error.Message != mailboxNotAuthorizedError {
+		t.Fatalf("expected mailbox authorization error, got %q", msg.Error.Message)
 	}
 	challengeMsg := readMessage(t, second)
 	if challengeMsg.Type != protocol.MessageTypeSubscribeChallenge || challengeMsg.Challenge == nil {
@@ -184,6 +189,7 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 func TestSubscribeRejectsReplayAcrossConnections(t *testing.T) {
 	server := newTestServer(t)
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 
 	first := dialTestConn(t, server)
 	defer first.Close()
@@ -208,6 +214,7 @@ func TestSubscribeRejectsReplayAcrossConnections(t *testing.T) {
 func TestSubscribeRejectsExpiredChallenge(t *testing.T) {
 	server := newTestServer(t)
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 	conn := dialTestConn(t, server)
 	defer conn.Close()
 	challenge := readChallenge(t, conn)
@@ -222,6 +229,7 @@ func TestSubscribeRejectsExpiredChallenge(t *testing.T) {
 func TestSubscribeRejectsInvalidAttemptWithoutClaimingMailbox(t *testing.T) {
 	server := newTestServer(t)
 	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
 	conn := dialTestConn(t, server)
 	defer conn.Close()
 	challenge := readChallenge(t, conn)
@@ -237,6 +245,54 @@ func TestSubscribeRejectsInvalidAttemptWithoutClaimingMailbox(t *testing.T) {
 	msg = readMessage(t, conn)
 	if msg.Type != protocol.MessageTypeAck {
 		t.Fatalf("expected mailbox to remain claimable after failed attempt, got %+v", msg)
+	}
+}
+
+func TestSubscribeRejectsMailboxWithoutPublishedDirectoryEntry(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+	conn := dialTestConn(t, server)
+	defer conn.Close()
+	challenge := readChallenge(t, conn)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected unpublished mailbox rejection, got %+v", msg)
+	}
+	if msg.Error.Message != mailboxNotPublishedError {
+		t.Fatalf("expected unpublished mailbox error, got %q", msg.Error.Message)
+	}
+}
+
+func TestSubscribeRejectsRevokedDeviceMailbox(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+	pending, err := identity.NewPendingEnrollment("bob", "bob-phone")
+	if err != nil {
+		t.Fatalf("new pending enrollment: %v", err)
+	}
+	approval, err := bobIdentity.Approve(pending.Request())
+	if err != nil {
+		t.Fatalf("approve enrollment: %v", err)
+	}
+	bobPhone, err := pending.Complete(*approval)
+	if err != nil {
+		t.Fatalf("complete enrollment: %v", err)
+	}
+	if err := bobIdentity.RevokeDevice("bob-phone"); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+	publishDirectoryEntry(t, server, bobIdentity)
+	conn := dialTestConn(t, server)
+	defer conn.Close()
+	challenge := readChallenge(t, conn)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobPhone, challenge)})
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected revoked device rejection, got %+v", msg)
+	}
+	if msg.Error.Message != mailboxNotPublishedError {
+		t.Fatalf("expected revoked mailbox to look unpublished, got %q", msg.Error.Message)
 	}
 }
 
@@ -314,6 +370,73 @@ func TestRendezvousPayloadRoundTripOverHTTP(t *testing.T) {
 	}
 }
 
+func TestDirectoryEntryRejectsDetailedValidationErrors(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+	entry := relayapi.SignedDirectoryEntry{Entry: relayapi.DirectoryEntry{Mailbox: "alice"}}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal directory entry: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/directory/mailboxes/alice", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set(authHeader, "secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put directory entry: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %s", resp.Status)
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Message != "invalid directory entry" {
+		t.Fatalf("expected generic directory error, got %q", payload.Message)
+	}
+}
+
+func TestRendezvousRejectsDetailedValidationErrors(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+	body, err := json.Marshal(relayapi.PutRendezvousRequest{Payload: relayapi.RendezvousPayload{Ciphertext: "", Nonce: "", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}})
+	if err != nil {
+		t.Fatalf("marshal rendezvous payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/rendezvous/test-room", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set(authHeader, "secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put rendezvous payload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %s", resp.Status)
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Message != "invalid rendezvous payload" {
+		t.Fatalf("expected generic rendezvous error, got %q", payload.Message)
+	}
+}
+
 type unexpectedMessageTypeError struct {
 	got  string
 	want string
@@ -329,6 +452,21 @@ func newTestServer(t *testing.T) *httptest.Server {
 	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{}).Handler())
 	t.Cleanup(server.Close)
 	return server
+}
+
+func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
+	t.Helper()
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
+		t.Fatalf("publish directory entry: %v", err)
+	}
 }
 
 func dialTestConn(t *testing.T, server *httptest.Server) *websocket.Conn {

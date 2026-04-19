@@ -34,6 +34,9 @@ func runIdentity(args []string) error {
 
 func runInit(args []string) error {
 	bfs := NewBaseFlagSet("identity init")
+	publishDirectory := bfs.FS.Bool("publish-directory", false, "publish the signed relay directory entry after initialization")
+	relayURL := bfs.FS.String("relay", "", "relay websocket URL")
+	relayToken := bfs.FS.String("relay-token", "", "relay auth token")
 	if err := bfs.Parse(args); err != nil {
 		return err
 	}
@@ -52,6 +55,16 @@ func runInit(args []string) error {
 		fmt.Printf("identity already exists for %s on device %s\n", id.AccountID, mustCurrentMailbox(id))
 	}
 	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
+	if *publishDirectory {
+		resolvedRelayURL, resolvedRelayToken, err := resolveRelayConfig(*bfs.RootDir, *relayURL, *relayToken)
+		if err != nil {
+			return err
+		}
+		if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken); err != nil {
+			return fmt.Errorf("publish relay directory entry: %w", err)
+		}
+		fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
+	}
 	return nil
 }
 

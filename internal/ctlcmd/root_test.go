@@ -18,6 +18,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/relay"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"rsc.io/qr"
 )
@@ -325,6 +326,30 @@ func TestExecuteGroupedIdentityInit(t *testing.T) {
 	})
 	if !strings.Contains(output, "initialized identity for alice on device alice") && !strings.Contains(output, "identity already exists for alice on device alice") {
 		t.Fatalf("unexpected identity init output: %q", output)
+	}
+}
+
+func TestIdentityInitCanPublishDirectoryEntry(t *testing.T) {
+	serverURL := newRelayTestServer(t)
+	dataDir := t.TempDir()
+	output := captureStdout(t, func() {
+		if err := runInit([]string{"-mailbox", "alice", "-data-dir", dataDir, "-publish-directory", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+			t.Fatalf("run identity init with publish: %v", err)
+		}
+	})
+	if !strings.Contains(output, "published trusted relay directory entry for alice") {
+		t.Fatalf("expected publish confirmation, got %q", output)
+	}
+	client, err := relayapi.NewClient(serverURL, "secret")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	entry, err := client.LookupDirectoryEntry("alice")
+	if err != nil {
+		t.Fatalf("lookup directory entry: %v", err)
+	}
+	if entry.Entry.Mailbox != "alice" {
+		t.Fatalf("expected alice directory entry, got %+v", entry)
 	}
 }
 

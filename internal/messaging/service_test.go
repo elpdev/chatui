@@ -14,6 +14,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	wsclient "github.com/elpdev/pando/internal/transport/ws"
 	"net/http/httptest"
@@ -45,8 +46,7 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approve bob enrollment: %v", err)
 	}
-	bobUpdated, err := pending.Complete(*approval)
-	if err != nil {
+	if _, err := pending.Complete(*approval); err != nil {
 		t.Fatalf("complete bob enrollment: %v", err)
 	}
 
@@ -54,8 +54,8 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt outgoing: %v", err)
 	}
-	if batch == nil || len(batch.Envelopes) == 0 || batch.Envelopes[0].BodyEncoding != BodyEncodingContactUpdate {
-		t.Fatalf("expected first outgoing envelope to be a contact update")
+	if batch == nil || len(batch.Envelopes) == 0 {
+		t.Fatalf("expected outgoing envelopes")
 	}
 
 	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
@@ -66,7 +66,7 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if err := bobStore.SaveContact(aliceContact); err != nil {
 		t.Fatalf("save alice contact: %v", err)
 	}
-	bobService := &Service{store: bobStore, identity: bobUpdated}
+	bobService := &Service{store: bobStore, identity: bob}
 
 	result, err := bobService.HandleIncoming(batch.Envelopes[0])
 	if err != nil {
@@ -470,11 +470,13 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 	defer cancel()
 	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
 	defer aliceClient.Close()
+	publishDirectoryEntry(t, server, aliceService.Identity())
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
 	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
+	publishDirectoryEntry(t, server, bobService.Identity())
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)
 	}
@@ -785,11 +787,13 @@ func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 	defer cancel()
 	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
 	defer aliceClient.Close()
+	publishDirectoryEntry(t, server, aliceService.Identity())
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
 	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
+	publishDirectoryEntry(t, server, bobService.Identity())
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)
 	}
@@ -840,6 +844,21 @@ func sendPhotoAndAwaitReceipt(t *testing.T, senderClient *wsclient.Client, sende
 		case <-deadline:
 			t.Fatal("timed out waiting for photo receipt")
 		}
+	}
+}
+
+func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
+	t.Helper()
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
+		t.Fatalf("publish directory entry: %v", err)
 	}
 }
 

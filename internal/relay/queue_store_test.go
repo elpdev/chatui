@@ -4,8 +4,11 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayapi"
 )
 
 func TestBoltQueueStorePersistsBacklog(t *testing.T) {
@@ -109,5 +112,39 @@ func TestMemoryQueueStoreAuthorizeMailboxIsAtomic(t *testing.T) {
 	}
 	if allowed != 1 || conflicts != 1 {
 		t.Fatalf("expected one winner and one conflict, got allowed=%d conflicts=%d", allowed, conflicts)
+	}
+}
+
+func TestBoltQueueStorePublishesMailboxOwnershipFromDirectoryEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.db")
+	store, err := NewBoltQueueStore(path)
+	if err != nil {
+		t.Fatalf("new bolt queue store: %v", err)
+	}
+	defer store.Close()
+	id, err := identity.New("bob")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: 1}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	if err := store.PutDirectoryEntry(*signed); err != nil {
+		t.Fatalf("put directory entry: %v", err)
+	}
+	device, err := id.CurrentDevice()
+	if err != nil {
+		t.Fatalf("current device: %v", err)
+	}
+	accountMailbox, err := store.LookupMailboxAccount(device.Mailbox)
+	if err != nil {
+		t.Fatalf("lookup mailbox account: %v", err)
+	}
+	if accountMailbox != id.AccountID {
+		t.Fatalf("expected mailbox owner %q, got %q", id.AccountID, accountMailbox)
+	}
+	if err := store.AuthorizeMailbox(device.Mailbox, device.SigningPublic); err != nil {
+		t.Fatalf("expected published owner to authorize, got %v", err)
 	}
 }

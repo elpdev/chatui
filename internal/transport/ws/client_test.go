@@ -14,6 +14,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/transport"
 )
 
@@ -50,6 +51,7 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	}
 	alice := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID)
 	defer alice.Close()
+	publishDirectoryEntry(t, server, aliceID)
 	if err := alice.Connect(ctx); err != nil {
 		t.Fatalf("connect alice: %v", err)
 	}
@@ -60,6 +62,7 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	}
 	bob := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobID)
 	defer bob.Close()
+	publishDirectoryEntry(t, server, bobID)
 	if err := bob.Connect(ctx); err != nil {
 		t.Fatalf("connect bob: %v", err)
 	}
@@ -103,6 +106,37 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	}
 }
 
+func TestConnectRequiresPublishedDirectoryEntryBeforeFirstSubscribe(t *testing.T) {
+	server := httptest.NewServer(relay.NewServer(testLogger(), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	aliceID, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new alice identity: %v", err)
+	}
+	client := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID)
+	defer client.Close()
+
+	err = client.Connect(ctx)
+	if err == nil {
+		t.Fatal("expected unpublished mailbox connect failure")
+	}
+	if !strings.Contains(err.Error(), "publish your signed relay directory entry before connecting") {
+		t.Fatalf("expected unpublished mailbox guidance, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "pando contact publish-directory --mailbox alice") {
+		t.Fatalf("expected publish command guidance, got %v", err)
+	}
+
+	publishDirectoryEntry(t, server, aliceID)
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("expected connect to succeed after publish, got %v", err)
+	}
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(testWriter{}, nil))
 }
@@ -111,4 +145,19 @@ type testWriter struct{}
 
 func (testWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
+}
+
+func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
+	t.Helper()
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
+		t.Fatalf("publish directory entry: %v", err)
+	}
 }
