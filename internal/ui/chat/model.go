@@ -59,6 +59,7 @@ type Model struct {
 	connected           bool
 	authFailed          bool
 	reconnectAttempt    int
+	reconnectDelay      time.Duration
 	peerFingerprint     string
 	peerVerified        bool
 	peerTyping          bool
@@ -75,10 +76,42 @@ type Model struct {
 	addContactError     string
 	addContactImporting bool
 	addContactOpen      bool
+	unread              map[string]int
+	toast               *toastState
 	width               int
 	height              int
 	sidebarWidth        int
 }
+
+// ConnState is the coarse connection state used by the app header to pick a
+// glyph and color. Call ConnectionState() to read it.
+type ConnState int
+
+const (
+	ConnConnecting ConnState = iota
+	ConnConnected
+	ConnReconnecting
+	ConnDisconnected
+	ConnAuthFailed
+)
+
+// ToastLevel controls the color of an ephemeral message shown below the
+// viewport.
+type ToastLevel int
+
+const (
+	ToastInfo ToastLevel = iota
+	ToastWarn
+	ToastBad
+)
+
+type toastState struct {
+	text      string
+	level     ToastLevel
+	expiresAt time.Time
+}
+
+const toastLifetime = 3 * time.Second
 
 type clientEventMsg transport.Event
 type connectResultMsg struct{ err error }
@@ -129,10 +162,11 @@ func New(deps Deps) *Model {
 		input:            input,
 		viewport:         vp,
 		typingSpinner:    sp,
-		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
+		status:           fmt.Sprintf("connecting as %s", deps.Mailbox),
 		connecting:       true,
 		selectedIndex:    -1,
 		filePickerDir:    defaultFilePickerDir(),
+		unread:           map[string]int{},
 	}
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
@@ -174,19 +208,19 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyCtrlO:
 			if m.authFailed {
-				m.status = "cannot attach: relay auth failed; restart with --relay-token"
+				m.pushToast("cannot attach: relay auth failed; restart with --relay-token", ToastBad)
 				return m, nil
 			}
 			if m.recipientMailbox == "" {
-				m.status = "select a contact from the sidebar first"
+				m.pushToast("select a contact from the sidebar first", ToastWarn)
 				return m, nil
 			}
 			if !m.connected {
-				m.status = "relay is not connected; waiting to reconnect"
+				m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
 				return m, nil
 			}
 			if err := m.openFilePicker(); err != nil {
-				m.status = fmt.Sprintf("open file picker failed: %v", err)
+				m.pushToast(fmt.Sprintf("open file picker failed: %v", err), ToastBad)
 				return m, nil
 			}
 			return m, nil
@@ -200,15 +234,15 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				return m, m.stopTypingCmd(previousRecipient)
 			}
 			if m.authFailed {
-				m.status = "cannot send: relay auth failed; restart with --relay-token"
+				m.pushToast("cannot send: relay auth failed; restart with --relay-token", ToastBad)
 				return m, nil
 			}
 			if m.recipientMailbox == "" {
-				m.status = "select a contact from the sidebar first"
+				m.pushToast("select a contact from the sidebar first", ToastWarn)
 				return m, nil
 			}
 			if !m.connected {
-				m.status = "relay is not connected; waiting to reconnect"
+				m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
 				return m, nil
 			}
 			if strings.HasPrefix(body, "/send-photo") {
@@ -222,7 +256,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
-				m.status = err.Error()
+				m.pushToast(err.Error(), ToastBad)
 				return m, nil
 			}
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
@@ -244,18 +278,21 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.handleConnectionError(msg.err)
 		}
-		m.markConnected(fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox))
+		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
 		return m, m.waitForEvent()
 	case reconnectResultMsg:
 		if msg.err != nil {
 			return m, m.handleConnectionError(msg.err)
 		}
-		m.markConnected(fmt.Sprintf("reconnected to %s and resubscribed as %s", m.relayURL, m.mailbox))
+		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
 		return m, m.waitForEvent()
 	case typingTickMsg:
 		now := time.Time(msg)
 		if m.peerTyping && !m.peerTypingExpiresAt.IsZero() && !now.Before(m.peerTypingExpiresAt) {
 			m.clearPeerTyping()
+		}
+		if m.toast != nil && !now.Before(m.toast.expiresAt) {
+			m.toast = nil
 		}
 		var spCmd tea.Cmd
 		if m.peerTyping {
@@ -269,11 +306,11 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
 	case sendResultMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("send failed: %v", msg.err)
+			m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
 			return m, nil
 		}
 		if err := m.messaging.SaveSent(msg.recipient, msg.messageID, msg.body); err != nil {
-			m.status = fmt.Sprintf("save history failed: %v", err)
+			m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 			return m, nil
 		}
 		if msg.recipient == m.recipientMailbox {
@@ -283,7 +320,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, nil
 	case typingSendResultMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("typing indicator failed: %v", msg.err)
+			m.pushToast(fmt.Sprintf("typing indicator failed: %v", msg.err), ToastBad)
 		}
 		return m, nil
 	case addContactResultMsg:
@@ -296,7 +333,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		m.selectContact(msg.contact.AccountID)
 		m.activateSelectedContact()
 		m.closeAddContactModal(true)
-		m.status = fmt.Sprintf("added verified contact %s", msg.contact.AccountID)
+		m.pushToast(fmt.Sprintf("added verified contact %s", msg.contact.AccountID), ToastInfo)
 		return m, nil
 	}
 
@@ -337,11 +374,42 @@ func (m *Model) View() string {
 	return m.renderAddContactModal(view)
 }
 
+// Status returns the persistent connection status line — connecting,
+// connected, reconnecting with a countdown, disconnected, or auth-failed.
+// Ephemeral feedback (send failures, contact imports, etc.) goes through the
+// toast slot instead, see Toast().
 func (m *Model) Status() string {
-	if m.recipientMailbox == "" {
-		return m.status + " | no active chat"
+	return m.status
+}
+
+// ConnectionState returns the coarse connection state. The App header uses
+// this to pick a pill color and glyph; Status() supplies the accompanying
+// detail text when one is useful.
+func (m *Model) ConnectionState() ConnState {
+	switch {
+	case m.authFailed:
+		return ConnAuthFailed
+	case m.disconnected:
+		return ConnDisconnected
+	case m.connecting && m.reconnectAttempt > 0:
+		return ConnReconnecting
+	case m.connecting:
+		return ConnConnecting
+	case m.connected:
+		return ConnConnected
+	default:
+		return ConnConnecting
 	}
-	return fmt.Sprintf("%s | peer=%s %s", m.status, verificationLabel(m.peerVerified), m.peerFingerprint)
+}
+
+// ReconnectDelay reports the most recently scheduled reconnect delay, or
+// zero if not currently waiting to reconnect. Useful for rendering
+// "reconnecting in 8s" in the header.
+func (m *Model) ReconnectDelay() time.Duration {
+	if m.ConnectionState() != ConnReconnecting {
+		return 0
+	}
+	return m.reconnectDelay
 }
 
 func (m *Model) Mailbox() string {
@@ -352,6 +420,37 @@ func (m *Model) RecipientMailbox() string {
 	return m.recipientMailbox
 }
 
+func (m *Model) PeerFingerprint() string {
+	return m.peerFingerprint
+}
+
+func (m *Model) PeerVerified() bool {
+	return m.peerVerified
+}
+
+// Toast returns the current ephemeral message and its level, or empty string
+// if no toast is active.
+func (m *Model) Toast() (string, ToastLevel) {
+	if m.toast == nil {
+		return "", ToastInfo
+	}
+	return m.toast.text, m.toast.level
+}
+
+// pushToast posts an ephemeral message to the toast slot. The message
+// persists for toastLifetime; after that the next typing tick clears it.
+func (m *Model) pushToast(text string, level ToastLevel) {
+	if text == "" {
+		m.toast = nil
+		return
+	}
+	m.toast = &toastState{
+		text:      text,
+		level:     level,
+		expiresAt: time.Now().Add(toastLifetime),
+	}
+}
+
 func (m *Model) Close() error {
 	return m.client.Close()
 }
@@ -360,7 +459,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 	switch msg.Type {
 	case protocol.MessageTypeAck:
 		if m.connecting {
-			m.markConnected(fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox))
+			m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
 		}
 	case protocol.MessageTypeIncoming:
 		if msg.Incoming == nil {
@@ -368,7 +467,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		}
 		result, err := m.messaging.HandleIncoming(*msg.Incoming)
 		if err != nil {
-			m.status = fmt.Sprintf("incoming message failed: %v", err)
+			m.pushToast(fmt.Sprintf("incoming message failed: %v", err), ToastBad)
 			return
 		}
 		if result == nil || result.Duplicate {
@@ -377,7 +476,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		if len(result.AckEnvelopes) != 0 {
 			for _, envelope := range result.AckEnvelopes {
 				if err := m.client.Send(envelope); err != nil {
-					m.status = fmt.Sprintf("delivery ack failed: %v", err)
+					m.pushToast(fmt.Sprintf("delivery ack failed: %v", err), ToastBad)
 					break
 				}
 			}
@@ -386,7 +485,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			m.upsertContact(result.ContactUpdated)
 			if result.ContactUpdated.AccountID == m.recipientMailbox {
 				m.syncRecipientDetails()
-				m.status = fmt.Sprintf("updated device bundle for %s", result.ContactUpdated.AccountID)
+				m.pushToast(fmt.Sprintf("updated device bundle for %s", result.ContactUpdated.AccountID), ToastInfo)
 			}
 			return
 		}
@@ -410,12 +509,12 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 					m.loadHistory()
 					m.syncViewport()
 				}
-				m.status = fmt.Sprintf("delivery acknowledged for %s", result.MessageID)
+				m.pushToast(fmt.Sprintf("delivery acknowledged for %s", result.MessageID), ToastInfo)
 			}
 			return
 		}
 		if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, msg.Incoming.Timestamp); err != nil {
-			m.status = fmt.Sprintf("save history failed: %v", err)
+			m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 			return
 		}
 		if result.PeerAccountID == m.recipientMailbox {
@@ -423,13 +522,13 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
 			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
 			m.syncViewport()
-			m.status = fmt.Sprintf("message received from %s", result.PeerAccountID)
 			return
 		}
-		m.status = fmt.Sprintf("new message from %s", result.PeerAccountID)
+		m.markUnread(result.PeerAccountID)
+		m.pushToast(fmt.Sprintf("new message from %s", result.PeerAccountID), ToastInfo)
 	case protocol.MessageTypeError:
 		if msg.Error != nil {
-			m.status = fmt.Sprintf("relay error: %s", msg.Error.Message)
+			m.pushToast(fmt.Sprintf("relay error: %s", msg.Error.Message), ToastBad)
 		}
 	}
 }
@@ -463,7 +562,8 @@ func (m *Model) reconnectCmd() tea.Cmd {
 	}
 	delay := time.Second * time.Duration(1<<shift)
 	m.connecting = true
-	m.status = fmt.Sprintf("reconnecting to relay in %s", delay)
+	m.reconnectDelay = delay
+	m.status = fmt.Sprintf("reconnecting in %s", delay)
 	return func() tea.Msg {
 		time.Sleep(delay)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -526,7 +626,7 @@ func (m *Model) sendTypingCmd(recipient, state string) tea.Cmd {
 func (m *Model) loadContacts(initialMailbox string) {
 	contacts, err := m.messaging.Contacts()
 	if err != nil {
-		m.status = fmt.Sprintf("load contacts failed: %v", err)
+		m.pushToast(fmt.Sprintf("load contacts failed: %v", err), ToastBad)
 		return
 	}
 	m.contacts = make([]contactItem, 0, len(contacts))
@@ -589,7 +689,7 @@ func (m *Model) closeAddContactModal(keepStatus bool) {
 	m.addContactError = ""
 	m.addContactValue = ""
 	if !keepStatus {
-		m.status = "add contact cancelled"
+		m.pushToast("add contact cancelled", ToastInfo)
 	}
 	m.input.Focus()
 }
@@ -666,13 +766,41 @@ func (m *Model) activateSelectedContact() bool {
 		return false
 	}
 	m.recipientMailbox = m.contacts[m.selectedIndex].Mailbox
+	m.clearUnread(m.recipientMailbox)
 	m.syncRecipientDetails()
 	m.clearPeerTyping()
 	m.loadHistory()
 	m.syncViewport()
 	m.syncInputPlaceholder()
-	m.status = fmt.Sprintf("opened chat with %s", m.recipientMailbox)
 	return true
+}
+
+// markUnread increments the unread count for a peer. No-op for the currently
+// open chat (those messages are visible already).
+func (m *Model) markUnread(peer string) {
+	if peer == "" || peer == m.recipientMailbox {
+		return
+	}
+	if m.unread == nil {
+		m.unread = map[string]int{}
+	}
+	m.unread[peer]++
+}
+
+// clearUnread resets the unread count for a peer. Called on chat open.
+func (m *Model) clearUnread(peer string) {
+	if m.unread == nil {
+		return
+	}
+	delete(m.unread, peer)
+}
+
+// Unread returns the unread-message count for a peer, or zero.
+func (m *Model) Unread(peer string) int {
+	if m.unread == nil {
+		return 0
+	}
+	return m.unread[peer]
 }
 
 func (m *Model) loadHistory() {
@@ -683,7 +811,7 @@ func (m *Model) loadHistory() {
 	}
 	records, err := m.messaging.History(m.recipientMailbox)
 	if err != nil {
-		m.status = fmt.Sprintf("load history failed: %v", err)
+		m.pushToast(fmt.Sprintf("load history failed: %v", err), ToastBad)
 		return
 	}
 	for _, record := range records {
@@ -761,28 +889,52 @@ func (m *Model) renderSidebar() string {
 	}
 	lines := []string{title, style.Muted.Render(shortcut)}
 	if len(m.contacts) == 0 {
-		lines = append(lines, style.Muted.Render("No contacts yet."))
-		lines = append(lines, style.Muted.Render("Press ctrl+n to add one here."))
+		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+n."))
 		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
 	}
 	for idx, contact := range m.contacts {
-		mailboxStyle := lipgloss.NewStyle()
-		if idx == m.selectedIndex {
-			mailboxStyle = style.Selected
-		}
-		if contact.Mailbox == m.recipientMailbox {
-			mailboxStyle = style.PeerAccentStyle(contact.Fingerprint).Bold(true)
-		}
-		statusStyle := style.UnverifiedWarn
-		statusText := "unverified"
-		if contact.Verified {
-			statusStyle = style.VerifiedOk
-			statusText = "verified"
-		}
-		line := fmt.Sprintf("%s  %s", mailboxStyle.Render(contact.Mailbox), statusStyle.Render(statusText))
-		lines = append(lines, line)
+		lines = append(lines, m.renderSidebarRow(idx, contact))
 	}
 	return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
+	isCursor := idx == m.selectedIndex
+	isActive := contact.Mailbox == m.recipientMailbox
+
+	// Leading marker column is always 2 characters wide so rows stay aligned:
+	//   "▌●" cursor on active, "▌ " cursor only, " ●" active only, "  " none.
+	cursorGlyph := " "
+	if isCursor {
+		cursorGlyph = style.PeerAccentStyle(contact.Fingerprint).Render(style.GlyphCursorRow)
+	}
+	activeGlyph := " "
+	if isActive {
+		activeGlyph = style.StatusOk.Render(style.GlyphActiveChat)
+	}
+	marker := cursorGlyph + activeGlyph
+
+	// Mailbox takes peer accent + bold when active, default foreground otherwise.
+	mailbox := contact.Mailbox
+	if isActive {
+		mailbox = style.PeerAccentStyle(contact.Fingerprint).Bold(true).Render(mailbox)
+	}
+
+	// Unread badge ("●N") rendered only when positive.
+	badge := ""
+	if n := m.Unread(contact.Mailbox); n > 0 {
+		badge = " " + style.UnreadBadge.Render(fmt.Sprintf("%s%d", style.GlyphUnreadDot, n))
+	}
+
+	// Verification label on the right.
+	statusStyle := style.UnverifiedWarn
+	statusText := "unverified"
+	if contact.Verified {
+		statusStyle = style.VerifiedOk
+		statusText = "verified"
+	}
+
+	return fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, statusStyle.Render(statusText))
 }
 
 func (m *Model) renderConversation() string {
@@ -801,11 +953,12 @@ func (m *Model) renderConversation() string {
 	if m.filePickerOpen {
 		return m.renderFilePicker(width)
 	}
+	peerHeading := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
 	header := []string{
-		style.Bold.Render(m.recipientMailbox),
-		style.Muted.Render(fmt.Sprintf("fingerprint %s  %s", style.FormatFingerprint(m.peerFingerprint), verificationLabel(m.peerVerified))),
+		peerHeading,
 		style.Muted.Render("ctrl+o attach file  |  /send-photo <path>  |  /send-voice <path>"),
 		m.viewport.View(),
+		m.renderToast(),
 		m.renderTypingIndicator(),
 		m.input.View(),
 	}
@@ -865,6 +1018,22 @@ func (m *Model) renderTypingIndicator() string {
 	return style.Italic.Render(fmt.Sprintf("%s is typing %s", m.recipientMailbox, m.typingSpinner.View()))
 }
 
+// renderToast produces the ephemeral-feedback line shown below the viewport.
+// Empty string when no toast is active; callers treat that as a blank row.
+func (m *Model) renderToast() string {
+	if m.toast == nil {
+		return ""
+	}
+	switch m.toast.level {
+	case ToastWarn:
+		return style.StatusWarn.Render(m.toast.text)
+	case ToastBad:
+		return style.StatusBad.Render(m.toast.text)
+	default:
+		return style.Muted.Render(m.toast.text)
+	}
+}
+
 func (m *Model) upsertContact(contact *identity.Contact) {
 	if contact == nil {
 		return
@@ -916,6 +1085,7 @@ func (m *Model) markConnected(status string) {
 	m.authFailed = false
 	m.disconnected = false
 	m.reconnectAttempt = 0
+	m.reconnectDelay = 0
 	m.syncInputPlaceholder()
 	m.status = status
 }
@@ -935,12 +1105,12 @@ func (m *Model) handleConnectionError(err error) tea.Cmd {
 func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string, string) (*messaging.OutgoingBatch, string, error)) (*Model, tea.Cmd) {
 	path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, prefix)))
 	if path == "" {
-		m.status = fmt.Sprintf("usage: %s <path>", prefix)
+		m.pushToast(fmt.Sprintf("usage: %s <path>", prefix), ToastWarn)
 		return m, nil
 	}
 	batch, displayBody, err := prepare(m.recipientMailbox, path)
 	if err != nil {
-		m.status = err.Error()
+		m.pushToast(err.Error(), ToastBad)
 		return m, nil
 	}
 	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
@@ -1024,29 +1194,28 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 	case attachmentModeFile:
 		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.recipientMailbox, path)
 	default:
-		m.status = fmt.Sprintf("unsupported attachment type %q", attachmentType)
+		m.pushToast(fmt.Sprintf("unsupported attachment type %q", attachmentType), ToastBad)
 		return nil
 	}
 	if err != nil {
-		m.status = err.Error()
+		m.pushToast(err.Error(), ToastBad)
 		return nil
 	}
 	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewport()
-	m.status = fmt.Sprintf("sending %s to %s", attachmentLabel(attachmentType), m.recipientMailbox)
 	return m.sendCmd(m.recipientMailbox, displayBody, batch)
 }
 
 func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.closeFilePicker("file picker closed")
+		m.closeFilePicker()
 		return nil
 	case tea.KeyBackspace:
 		if err := m.goToParentDirectory(); err != nil {
-			m.status = fmt.Sprintf("file picker failed: %v", err)
+			m.pushToast(fmt.Sprintf("file picker failed: %v", err), ToastBad)
 		}
 		return nil
 	case tea.KeyUp:
@@ -1062,11 +1231,11 @@ func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
 		}
 		if entry.IsDir {
 			if err := m.openFilePickerAt(entry.Path); err != nil {
-				m.status = fmt.Sprintf("open directory failed: %v", err)
+				m.pushToast(fmt.Sprintf("open directory failed: %v", err), ToastBad)
 			}
 			return nil
 		}
-		m.closeFilePicker(fmt.Sprintf("selected %s", entry.Name))
+		m.closeFilePicker()
 		return m.sendAttachment(entry.Path, attachmentModeFile)
 	}
 	return nil
@@ -1086,18 +1255,14 @@ func (m *Model) openFilePickerAt(dir string) error {
 	m.filePickerEntries = entries
 	m.filePickerSelected = 0
 	m.input.Blur()
-	m.status = fmt.Sprintf("attach a file for %s", m.recipientMailbox)
 	return nil
 }
 
-func (m *Model) closeFilePicker(status string) {
+func (m *Model) closeFilePicker() {
 	m.filePickerOpen = false
 	m.filePickerEntries = nil
 	m.filePickerSelected = 0
 	m.input.Focus()
-	if status != "" {
-		m.status = status
-	}
 }
 
 func (m *Model) goToParentDirectory() error {
