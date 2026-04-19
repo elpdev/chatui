@@ -236,7 +236,7 @@ func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
 	model.SetSize(100, 20)
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	if !model.addContactOpen {
+	if !model.addContact.open {
 		t.Fatal("expected add contact modal to open")
 	}
 	view := model.View()
@@ -245,7 +245,7 @@ func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.addContactOpen {
+	if model.addContact.open {
 		t.Fatal("expected add contact modal to close")
 	}
 	if toast, _ := model.Toast(); toast != "add contact cancelled" {
@@ -284,7 +284,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	if previewCmd != nil {
 		t.Fatal("expected first ctrl+s to only show preview, no async command")
 	}
-	if model.addContactPreview == nil {
+	if model.addContact.preview == nil {
 		t.Fatal("expected preview state to be populated after ctrl+s")
 	}
 	// Second ctrl+s commits the import.
@@ -298,7 +298,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	}
 	_, _ = model.Update(msg)
 
-	if model.addContactOpen {
+	if model.addContact.open {
 		t.Fatal("expected add contact modal to close after import")
 	}
 	if model.recipientMailbox != "bob" {
@@ -358,7 +358,7 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
 	// First ctrl+s parses; second ctrl+s commits.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	if model.addContactPreview == nil {
+	if model.addContact.preview == nil {
 		t.Fatal("expected verbose paste to parse into a preview")
 	}
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -398,18 +398,18 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no command when invite fails to parse")
 	}
-	if model.addContactPreview != nil {
+	if model.addContact.preview != nil {
 		t.Fatal("expected no preview when invite fails to parse")
 	}
 
-	if !model.addContactOpen {
+	if !model.addContact.open {
 		t.Fatal("expected modal to stay open on error")
 	}
-	if model.addContactValue != badInvite {
-		t.Fatalf("expected bad invite to remain for editing, got %q", model.addContactValue)
+	if model.addContact.value != badInvite {
+		t.Fatalf("expected bad invite to remain for editing, got %q", model.addContact.value)
 	}
-	if !strings.Contains(model.addContactError, "decode invite input") {
-		t.Fatalf("expected decode error, got %q", model.addContactError)
+	if !strings.Contains(model.addContact.error, "decode invite input") {
+		t.Fatalf("expected decode error, got %q", model.addContact.error)
 	}
 	view := model.View()
 	if !strings.Contains(view, "decode invite input") {
@@ -806,7 +806,7 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	model.connected = true
 	model.connecting = false
 	model.SetSize(100, 20)
-	model.filePickerDir = pickerDir
+	model.filePicker.dir = pickerDir
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	if updated != model {
@@ -815,7 +815,7 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected modal open without async command")
 	}
-	if !model.filePickerOpen {
+	if !model.filePicker.open {
 		t.Fatal("expected file picker to open")
 	}
 	if !strings.Contains(model.View(), "Attach File") {
@@ -829,7 +829,7 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected send command from picker selection")
 	}
-	if model.filePickerOpen {
+	if model.filePicker.open {
 		t.Fatal("expected file picker to close after selecting a file")
 	}
 	msg := cmd()
@@ -840,7 +840,7 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	if len(client.sent) == 0 {
 		t.Fatal("expected picker send to produce envelopes")
 	}
-	if model.filePickerOpen {
+	if model.filePicker.open {
 		t.Fatal("expected picker to close after selecting a file")
 	}
 	found := false
@@ -878,10 +878,10 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	model.connected = true
 	model.connecting = false
 	model.SetSize(100, 20)
-	model.filePickerDir = pickerRoot
+	model.filePicker.dir = pickerRoot
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
-	if !model.filePickerOpen {
+	if !model.filePicker.open {
 		t.Fatal("expected file picker to open")
 	}
 	// First entry is the synthetic ".." parent pointer.
@@ -895,17 +895,17 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if model.filePickerDir != childDir {
-		t.Fatalf("expected picker to enter child dir, got %q", model.filePickerDir)
+	if model.filePicker.dir != childDir {
+		t.Fatalf("expected picker to enter child dir, got %q", model.filePicker.dir)
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-	if model.filePickerDir != pickerRoot {
-		t.Fatalf("expected picker to return to root dir, got %q", model.filePickerDir)
+	if model.filePicker.dir != pickerRoot {
+		t.Fatalf("expected picker to return to root dir, got %q", model.filePicker.dir)
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.filePickerOpen {
+	if model.filePicker.open {
 		t.Fatal("expected file picker to close on escape")
 	}
 }
@@ -913,9 +913,9 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 func TestFilePickerVisibleEntriesStayWithinWindow(t *testing.T) {
 	model := &Model{}
 	for i := 0; i < 20; i++ {
-		model.filePickerEntries = append(model.filePickerEntries, filePickerEntry{Name: fmt.Sprintf("entry-%02d", i)})
+		model.filePicker.entries = append(model.filePicker.entries, filePickerEntry{Name: fmt.Sprintf("entry-%02d", i)})
 	}
-	model.filePickerSelected = 10
+	model.filePicker.selected = 10
 
 	visible, hiddenAbove, hiddenBelow := model.filePickerVisibleEntries(5)
 	if !hiddenAbove {
@@ -935,7 +935,7 @@ func TestFilePickerVisibleEntriesStayWithinWindow(t *testing.T) {
 	}
 	foundSelected := false
 	for _, entry := range visible {
-		if entry.index == model.filePickerSelected {
+		if entry.index == model.filePicker.selected {
 			foundSelected = true
 			break
 		}
@@ -979,7 +979,7 @@ func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 		RelayURL:         "ws://localhost:8080/ws",
 	})
 	model.SetSize(100, 20)
-	envelopes, err := bobService.TypingEnvelopes("alice", typingStateActive)
+	envelopes, err := bobService.TypingEnvelopes("alice", messaging.TypingStateActive)
 	if err != nil {
 		t.Fatalf("typing envelopes: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 		t.Fatalf("expected typing indicator to animate between frames, got same view: %q", view3)
 	}
 
-	model.peerTypingExpiresAt = time.Now().UTC().Add(-time.Second)
+	model.typing.peerExpiresAt = time.Now().UTC().Add(-time.Second)
 	_, _ = model.Update(typingTickMsg(time.Now().UTC()))
 	view = model.View()
 	if strings.Contains(view, "bob is typing") {
@@ -1072,7 +1072,7 @@ func TestHandleInputActivitySendsTypingWithoutSavingHistory(t *testing.T) {
 	if len(client.sent) < 2 {
 		t.Fatalf("expected idle typing envelope after clearing input, got %d sends", len(client.sent))
 	}
-	if model.localTypingSent {
+	if model.typing.localSent {
 		t.Fatal("expected local typing state to reset")
 	}
 }
@@ -1438,15 +1438,15 @@ func TestFilePickerRendersSizesAndParentEntry(t *testing.T) {
 	model.connected = true
 	model.connecting = false
 	model.SetSize(100, 20)
-	model.filePickerDir = dir
+	model.filePicker.dir = dir
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
-	if !model.filePickerOpen {
+	if !model.filePicker.open {
 		t.Fatal("expected picker to open")
 	}
 
 	// First entry must be the parent pointer; note.txt must follow with its size.
-	entries := model.filePickerEntries
+	entries := model.filePicker.entries
 	if len(entries) < 2 {
 		t.Fatalf("expected picker to include .. + note.txt, got %+v", entries)
 	}

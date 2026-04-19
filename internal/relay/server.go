@@ -74,9 +74,7 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if options.RateLimitPerMinute <= 0 {
 		options.RateLimitPerMinute = 120
 	}
-	if configurable, ok := queue.(interface{ SetLimits(QueueLimits) }); ok {
-		configurable.SetLimits(QueueLimits{MaxMessages: options.MaxQueuedMessages, MaxBytes: options.MaxQueuedBytes})
-	}
+	queue.SetLimits(QueueLimits{MaxMessages: options.MaxQueuedMessages, MaxBytes: options.MaxQueuedBytes})
 	server := &Server{
 		logger:    logger,
 		queue:     queue,

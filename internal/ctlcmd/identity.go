@@ -7,6 +7,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 	qrterminal "github.com/mdp/qrterminal/v3"
@@ -128,7 +129,7 @@ func runInviteCode(args []string) error {
 	if err != nil {
 		return err
 	}
-	code, err := encodeInviteCode(id.InviteBundle())
+	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		return err
 	}

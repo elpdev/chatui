@@ -3,9 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -61,60 +58,40 @@ const (
 	statusFailed                          // send returned an error
 )
 
-type filePickerEntry struct {
-	Name     string
-	Path     string
-	IsDir    bool
-	IsParent bool  // true for the synthetic ".." entry
-	Size     int64 // only meaningful for files (IsDir == false)
-}
-
 type Model struct {
-	client              transport.Client
-	messaging           *messaging.Service
-	mailbox             string
-	recipientMailbox    string
-	relayURL            string
-	input               textinput.Model
-	viewport            viewport.Model
-	contacts            []contactItem
-	selectedIndex       int
-	messageItems        []messageItem
-	messages            []string
-	status              string
-	connecting          bool
-	disconnected        bool
-	connected           bool
-	authFailed          bool
-	reconnectAttempt    int
-	reconnectDelay      time.Duration
-	peerFingerprint     string
-	peerVerified        bool
-	peerTrustSource     string
-	peerTyping          bool
-	peerTypingExpiresAt time.Time
-	typingSpinner       spinner.Model
-	localTypingSent     bool
-	localTypingPeer     string
-	localTypingAt       time.Time
-	filePickerOpen      bool
-	filePickerDir       string
-	filePickerEntries   []filePickerEntry
-	filePickerSelected  int
-	addContactValue     string
-	addContactError     string
-	addContactImporting bool
-	addContactOpen      bool
-	addContactPreview   *identity.Contact
-	helpOpen            bool
-	peerDetailOpen      bool
-	focus               focusState
-	pendingIncoming     int
-	unread              map[string]int
-	toast               *toastState
-	width               int
-	height              int
-	sidebarWidth        int
+	client           transport.Client
+	messaging        *messaging.Service
+	mailbox          string
+	recipientMailbox string
+	relayURL         string
+	input            textinput.Model
+	viewport         viewport.Model
+	contacts         []contactItem
+	selectedIndex    int
+	messageItems     []messageItem
+	messages         []string
+	status           string
+	connecting       bool
+	disconnected     bool
+	connected        bool
+	authFailed       bool
+	reconnectAttempt int
+	reconnectDelay   time.Duration
+	peerFingerprint  string
+	peerVerified     bool
+	peerTrustSource  string
+	typing           typingState
+	filePicker       filePickerState
+	addContact       addContactState
+	helpOpen         bool
+	peerDetailOpen   bool
+	focus            focusState
+	pendingIncoming  int
+	unread           map[string]int
+	toast            *toastState
+	width            int
+	height           int
+	sidebarWidth     int
 }
 
 // focusState tracks which pane owns keyboard input. In wide mode both panes
@@ -181,11 +158,6 @@ type sendResultMsg struct {
 const (
 	typingAnimationInterval = 350 * time.Millisecond
 	typingIdleTimeout       = 2 * time.Second
-	typingStateActive       = "active"
-	typingStateIdle         = "idle"
-	attachmentModePhoto     = "photo"
-	attachmentModeVoice     = "voice"
-	attachmentModeFile      = "file"
 	addContactLimit         = 16384
 )
 
@@ -198,10 +170,6 @@ func New(deps Deps) *Model {
 	vp := viewport.New(0, 0)
 	vp.SetContent("")
 
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = style.Muted
-
 	m := &Model{
 		client:           deps.Client,
 		messaging:        deps.Messaging,
@@ -210,11 +178,11 @@ func New(deps Deps) *Model {
 		relayURL:         deps.RelayURL,
 		input:            input,
 		viewport:         vp,
-		typingSpinner:    sp,
+		typing:           typingState{spinner: newTypingSpinner()},
 		status:           fmt.Sprintf("connecting as %s", deps.Mailbox),
 		connecting:       true,
 		selectedIndex:    -1,
-		filePickerDir:    defaultFilePickerDir(),
+		filePicker:       filePickerState{dir: defaultFilePickerDir()},
 		unread:           map[string]int{},
 	}
 	m.loadContacts(deps.RecipientMailbox)
@@ -241,10 +209,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		if m.helpOpen {
 			return m.handleHelpKey(msg)
 		}
-		if m.filePickerOpen {
+		if m.filePicker.open {
 			return m, m.updateFilePicker(msg)
 		}
-		if m.addContactOpen {
+		if m.addContact.open {
 			return m.handleAddContactKey(msg)
 		}
 		// Help and focus-switching live above the input so `?` always works
@@ -378,19 +346,19 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, m.waitForEvent()
 	case typingTickMsg:
 		now := time.Time(msg)
-		if m.peerTyping && !m.peerTypingExpiresAt.IsZero() && !now.Before(m.peerTypingExpiresAt) {
+		if m.typing.peerVisible && !m.typing.peerExpiresAt.IsZero() && !now.Before(m.typing.peerExpiresAt) {
 			m.clearPeerTyping()
 		}
 		if m.toast != nil && !now.Before(m.toast.expiresAt) {
 			m.toast = nil
 		}
 		var spCmd tea.Cmd
-		if m.peerTyping {
-			m.typingSpinner, spCmd = m.typingSpinner.Update(spinner.TickMsg{Time: now})
+		if m.typing.peerVisible {
+			m.typing.spinner, spCmd = m.typing.spinner.Update(spinner.TickMsg{Time: now})
 		}
 		var cmd tea.Cmd
-		if m.localTypingSent && !m.localTypingAt.IsZero() && now.Sub(m.localTypingAt) >= typingIdleTimeout {
-			cmd = m.sendTypingCmd(m.localTypingPeer, typingStateIdle)
+		if m.typing.localSent && !m.typing.localAt.IsZero() && now.Sub(m.typing.localAt) >= typingIdleTimeout {
+			cmd = m.sendTypingCmd(m.typing.localPeer, messaging.TypingStateIdle)
 			m.resetLocalTypingState()
 		}
 		return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
@@ -420,9 +388,9 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		}
 		return m, nil
 	case addContactResultMsg:
-		m.addContactImporting = false
+		m.addContact.importing = false
 		if msg.err != nil {
-			m.addContactError = msg.err.Error()
+			m.addContact.error = msg.err.Error()
 			return m, nil
 		}
 		m.upsertContact(msg.contact)
@@ -478,7 +446,7 @@ func (m *Model) View() string {
 	if m.helpOpen {
 		return m.renderHelpModal(view)
 	}
-	if m.addContactOpen {
+	if m.addContact.open {
 		return m.renderAddContactModal(view)
 	}
 	if m.peerDetailOpen {
@@ -605,12 +573,10 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		if result.Control {
 			if result.TypingState != "" {
 				if result.PeerAccountID == m.recipientMailbox {
-					if result.TypingState == typingStateActive {
-						m.peerTyping = true
-						m.peerTypingExpiresAt = result.TypingExpiresAt
-						m.typingSpinner = spinner.New()
-						m.typingSpinner.Spinner = spinner.Dot
-						m.typingSpinner.Style = style.Muted
+					if result.TypingState == messaging.TypingStateActive {
+						m.typing.peerVisible = true
+						m.typing.peerExpiresAt = result.TypingExpiresAt
+						m.typing.spinner = newTypingSpinner()
 					} else {
 						m.clearPeerTyping()
 					}
@@ -724,12 +690,6 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) typingTickCmd() tea.Cmd {
-	return tea.Tick(typingAnimationInterval, func(t time.Time) tea.Msg {
-		return typingTickMsg(t)
-	})
-}
-
 func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) tea.Cmd {
 	return func() tea.Msg {
 		if batch == nil {
@@ -741,24 +701,6 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 			}
 		}
 		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body}
-	}
-}
-
-func (m *Model) sendTypingCmd(recipient, state string) tea.Cmd {
-	if recipient == "" || m.authFailed || !m.connected {
-		return nil
-	}
-	return func() tea.Msg {
-		envelopes, err := m.messaging.TypingEnvelopes(recipient, state)
-		if err != nil {
-			return typingSendResultMsg{err: err}
-		}
-		for _, envelope := range envelopes {
-			if err := m.client.Send(envelope); err != nil {
-				return typingSendResultMsg{err: err}
-			}
-		}
-		return typingSendResultMsg{}
 	}
 }
 
@@ -815,26 +757,6 @@ func (m *Model) selectContact(mailbox string) {
 	}
 }
 
-func (m *Model) openAddContactModal() {
-	m.addContactOpen = true
-	m.addContactError = ""
-	m.addContactImporting = false
-	m.addContactValue = ""
-	m.input.Blur()
-}
-
-func (m *Model) closeAddContactModal(keepStatus bool) {
-	m.addContactOpen = false
-	m.addContactImporting = false
-	m.addContactError = ""
-	m.addContactValue = ""
-	m.addContactPreview = nil
-	if !keepStatus {
-		m.pushToast("add contact cancelled", ToastInfo)
-	}
-	m.input.Focus()
-}
-
 // handleHelpKey closes the help overlay on ?, esc, q, or ctrl+c. Every other
 // key is absorbed so the chat input doesn't receive keystrokes meant to
 // dismiss the overlay.
@@ -868,102 +790,6 @@ func (m *Model) toggleFocus() {
 func (m *Model) jumpToLatest() {
 	m.viewport.GotoBottom()
 	m.pendingIncoming = 0
-}
-
-func (m *Model) handleAddContactKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
-	// Preview step — the user already parsed a valid invite and is one
-	// keystroke away from committing. Keep this narrow: ctrl+s commits, esc
-	// steps back to the paste editor (preserving the text so they can retry).
-	if m.addContactPreview != nil {
-		switch msg.Type {
-		case tea.KeyEsc:
-			if m.addContactImporting {
-				return m, nil
-			}
-			m.addContactPreview = nil
-			m.addContactError = ""
-			return m, nil
-		case tea.KeyCtrlS:
-			if m.addContactImporting {
-				return m, nil
-			}
-			m.addContactError = ""
-			m.addContactImporting = true
-			return m, m.importContactCmd(strings.TrimSpace(m.addContactValue))
-		}
-		return m, nil
-	}
-
-	// Paste / edit step.
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeAddContactModal(false)
-		return m, nil
-	case tea.KeyCtrlS:
-		if m.addContactImporting {
-			return m, nil
-		}
-		trimmed := strings.TrimSpace(m.addContactValue)
-		if trimmed == "" {
-			m.addContactError = "invite input is empty"
-			return m, nil
-		}
-		contact, err := m.messaging.PreviewContactInviteText(trimmed)
-		if err != nil {
-			m.addContactError = err.Error()
-			return m, nil
-		}
-		m.addContactError = ""
-		m.addContactPreview = contact
-		return m, nil
-	case tea.KeyEnter, tea.KeyCtrlJ:
-		m.appendAddContactText("\n")
-		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyDelete:
-		m.deleteAddContactRune()
-		return m, nil
-	case tea.KeyCtrlU:
-		m.addContactValue = ""
-		m.addContactError = ""
-		return m, nil
-	case tea.KeyRunes:
-		m.appendAddContactText(string(msg.Runes))
-		return m, nil
-	default:
-		return m, nil
-	}
-}
-
-func (m *Model) appendAddContactText(text string) {
-	if text == "" || len([]rune(m.addContactValue)) >= addContactLimit {
-		return
-	}
-	remaining := addContactLimit - len([]rune(m.addContactValue))
-	runes := []rune(text)
-	if len(runes) > remaining {
-		runes = runes[:remaining]
-	}
-	m.addContactValue += string(runes)
-	m.addContactError = ""
-}
-
-func (m *Model) deleteAddContactRune() {
-	runes := []rune(m.addContactValue)
-	if len(runes) == 0 {
-		return
-	}
-	m.addContactValue = string(runes[:len(runes)-1])
-	m.addContactError = ""
-}
-
-func (m *Model) importContactCmd(text string) tea.Cmd {
-	return func() tea.Msg {
-		contact, err := m.messaging.ImportContactInviteText(text, true)
-		if err != nil {
-			return addContactResultMsg{err: err}
-		}
-		return addContactResultMsg{contact: contact}
-	}
 }
 
 func (m *Model) activateSelectedContact() bool {
@@ -1244,7 +1070,7 @@ func (m *Model) updateLayout() {
 func (m *Model) renderSidebar() string {
 	title := style.Bold.Render("Contacts")
 	shortcut := "up/down browse  enter open  ctrl+n add  tab switch pane"
-	if m.addContactOpen {
+	if m.addContact.open {
 		shortcut = "add contact open  ctrl+s import  esc cancel"
 	}
 	lines := []string{title, style.Muted.Render(shortcut)}
@@ -1309,7 +1135,7 @@ func (m *Model) renderConversation() string {
 	if m.recipientMailbox == "" {
 		return m.renderEmptyConversation(width)
 	}
-	if m.filePickerOpen {
+	if m.filePicker.open {
 		return m.renderFilePicker(width)
 	}
 	peerHeading := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
@@ -1383,85 +1209,6 @@ func (m *Model) renderJumpPill(width int) string {
 		pad = 0
 	}
 	return strings.Repeat(" ", pad) + pill
-}
-
-func (m *Model) renderAddContactModal(base string) string {
-	modalWidth := min(max(58, m.width*2/3), max(40, m.width-6))
-	modalHeight := min(max(15, m.height*2/3), max(12, m.height-4))
-	if modalWidth <= 0 || modalHeight <= 0 {
-		return base
-	}
-	bodyWidth := max(24, modalWidth-6)
-
-	title := style.Bright.Bold(true).Render("Add Contact")
-	parts := []string{title}
-
-	if m.addContactPreview != nil {
-		parts = append(parts, m.renderAddContactPreview(bodyWidth))
-		footer := "ctrl+s import and verify   esc back"
-		if m.addContactImporting {
-			footer = "importing contact..."
-		}
-		if m.addContactError != "" {
-			parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
-		}
-		parts = append(parts, style.Subtle.Render(footer))
-	} else {
-		inputHeight := max(5, modalHeight-10)
-		description := style.Dim.Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Pressing ctrl+s parses it and shows a preview before anything is saved.")
-		input := m.renderAddContactEditor(bodyWidth, inputHeight)
-		parts = append(parts, description, input)
-		if m.addContactError != "" {
-			parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
-		}
-		footer := "enter newline  ctrl+s preview  ctrl+u clear  esc cancel"
-		parts = append(parts, style.Subtle.Render(footer))
-	}
-
-	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(strings.Join(parts, "\n\n"))
-	background := style.Faint.Render(base)
-	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
-}
-
-// renderAddContactPreview draws the read-only "parsed invite" card shown after
-// a successful parse, before the user commits the import.
-func (m *Model) renderAddContactPreview(width int) string {
-	c := m.addContactPreview
-	if c == nil {
-		return ""
-	}
-	fp := c.Fingerprint()
-	deviceCount := len(c.ActiveDevices())
-	row := func(label, value string) string {
-		return style.Muted.Render(label) + "  " + value
-	}
-	body := strings.Join([]string{
-		style.Bold.Render("parsed invite"),
-		row("account    ", style.PeerAccentStyle(fp).Bold(true).Render(c.AccountID)),
-		row("fingerprint", style.Bright.Render(style.FormatFingerprint(fp))),
-		row("devices    ", style.Bright.Render(fmt.Sprintf("%d active", deviceCount))),
-	}, "\n")
-	return lipgloss.NewStyle().Width(width).Render(body)
-}
-
-func (m *Model) renderAddContactEditor(width, height int) string {
-	content := m.addContactValue
-	if content == "" {
-		content = style.Muted.Render("account: alice\nfingerprint: ...\ninvite-code: ...")
-	} else {
-		content += style.CursorBlock.Render("█")
-	}
-	lines := strings.Split(content, "\n")
-	if len(lines) > height {
-		lines = lines[len(lines)-height:]
-	}
-	visible := strings.Join(lines, "\n")
-	meta := style.Subtle.Render(fmt.Sprintf("%d chars", len([]rune(m.addContactValue))))
-	if len(m.addContactValue) >= addContactLimit {
-		meta = style.StatusBad.Render(fmt.Sprintf("input limit reached (%d chars)", addContactLimit))
-	}
-	box := style.InputBorder.Width(width).Height(height).Padding(0, 1).Render(visible)
-	return strings.Join([]string{box, meta}, "\n")
 }
 
 // helpShortcut is one entry in the help overlay — a key label and a brief
@@ -1589,13 +1336,6 @@ func renderHelpColumn(entries []helpShortcut, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderTypingIndicator() string {
-	if !m.peerTyping || m.recipientMailbox == "" {
-		return ""
-	}
-	return style.Italic.Render(fmt.Sprintf("%s is typing %s", m.recipientMailbox, m.typingSpinner.View()))
-}
-
 // renderToast produces the ephemeral-feedback line shown below the viewport.
 // Empty string when no toast is active; callers treat that as a blank row.
 func (m *Model) renderToast() string {
@@ -1702,346 +1442,4 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
 	return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
-}
-
-func (m *Model) handleInputActivity(previousValue, currentValue string) tea.Cmd {
-	if previousValue == currentValue {
-		return nil
-	}
-	if m.recipientMailbox == "" || m.authFailed || !m.connected {
-		return nil
-	}
-	now := time.Now().UTC()
-	if strings.TrimSpace(currentValue) == "" {
-		if !m.localTypingSent || m.localTypingPeer != m.recipientMailbox {
-			m.resetLocalTypingState()
-			return nil
-		}
-		cmd := m.sendTypingCmd(m.recipientMailbox, typingStateIdle)
-		m.resetLocalTypingState()
-		return cmd
-	}
-	m.localTypingAt = now
-	if m.localTypingSent && m.localTypingPeer == m.recipientMailbox {
-		return nil
-	}
-	m.localTypingSent = true
-	m.localTypingPeer = m.recipientMailbox
-	return m.sendTypingCmd(m.recipientMailbox, typingStateActive)
-}
-
-func (m *Model) stopTypingCmd(recipient string) tea.Cmd {
-	if recipient == "" || !m.localTypingSent || m.localTypingPeer != recipient {
-		m.resetLocalTypingState()
-		return nil
-	}
-	cmd := m.sendTypingCmd(recipient, typingStateIdle)
-	m.resetLocalTypingState()
-	return cmd
-}
-
-func (m *Model) resetLocalTypingState() {
-	m.localTypingSent = false
-	m.localTypingPeer = ""
-	m.localTypingAt = time.Time{}
-}
-
-func (m *Model) clearPeerTyping() {
-	m.peerTyping = false
-	m.peerTypingExpiresAt = time.Time{}
-	m.typingSpinner = spinner.New()
-	m.typingSpinner.Spinner = spinner.Dot
-	m.typingSpinner.Style = style.Muted
-}
-
-func defaultFilePickerDir() string {
-	if dir, err := os.Getwd(); err == nil && dir != "" {
-		return dir
-	}
-	if dir, err := os.UserHomeDir(); err == nil && dir != "" {
-		return dir
-	}
-	return string(filepath.Separator)
-}
-
-func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
-	var (
-		batch       *messaging.OutgoingBatch
-		displayBody string
-		err         error
-	)
-	switch attachmentType {
-	case attachmentModePhoto:
-		batch, displayBody, err = m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
-	case attachmentModeVoice:
-		batch, displayBody, err = m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
-	case attachmentModeFile:
-		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.recipientMailbox, path)
-	default:
-		m.pushToast(fmt.Sprintf("unsupported attachment type %q", attachmentType), ToastBad)
-		return nil
-	}
-	if err != nil {
-		m.pushToast(err.Error(), ToastBad)
-		return nil
-	}
-	m.appendMessageItem(messageItem{
-		direction:    "outbound",
-		sender:       m.mailbox,
-		body:         displayBody,
-		timestamp:    time.Now().UTC(),
-		messageID:    batchMessageID(batch),
-		status:       statusPending,
-		isAttachment: true,
-	})
-	m.input.SetValue("")
-	m.resetLocalTypingState()
-	m.syncViewportToBottom()
-	return m.sendCmd(m.recipientMailbox, displayBody, batch)
-}
-
-func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeFilePicker()
-		return nil
-	case tea.KeyBackspace:
-		if err := m.goToParentDirectory(); err != nil {
-			m.pushToast(fmt.Sprintf("file picker failed: %v", err), ToastBad)
-		}
-		return nil
-	case tea.KeyUp:
-		m.moveFilePickerSelection(-1)
-		return nil
-	case tea.KeyDown:
-		m.moveFilePickerSelection(1)
-		return nil
-	case tea.KeyEnter:
-		entry := m.selectedFilePickerEntry()
-		if entry == nil {
-			return nil
-		}
-		if entry.IsDir {
-			if err := m.openFilePickerAt(entry.Path); err != nil {
-				m.pushToast(fmt.Sprintf("open directory failed: %v", err), ToastBad)
-			}
-			return nil
-		}
-		m.closeFilePicker()
-		return m.sendAttachment(entry.Path, attachmentModeFile)
-	}
-	return nil
-}
-
-func (m *Model) openFilePicker() error {
-	return m.openFilePickerAt(m.filePickerDir)
-}
-
-func (m *Model) openFilePickerAt(dir string) error {
-	entries, cleanedDir, err := readFilePickerEntries(dir)
-	if err != nil {
-		return err
-	}
-	m.filePickerOpen = true
-	m.filePickerDir = cleanedDir
-	m.filePickerEntries = entries
-	m.filePickerSelected = 0
-	m.input.Blur()
-	return nil
-}
-
-func (m *Model) closeFilePicker() {
-	m.filePickerOpen = false
-	m.filePickerEntries = nil
-	m.filePickerSelected = 0
-	m.input.Focus()
-}
-
-func (m *Model) goToParentDirectory() error {
-	parent := filepath.Dir(m.filePickerDir)
-	if parent == m.filePickerDir {
-		return nil
-	}
-	return m.openFilePickerAt(parent)
-}
-
-func (m *Model) moveFilePickerSelection(delta int) {
-	if len(m.filePickerEntries) == 0 {
-		return
-	}
-	m.filePickerSelected += delta
-	if m.filePickerSelected < 0 {
-		m.filePickerSelected = 0
-	}
-	if m.filePickerSelected >= len(m.filePickerEntries) {
-		m.filePickerSelected = len(m.filePickerEntries) - 1
-	}
-}
-
-func (m *Model) selectedFilePickerEntry() *filePickerEntry {
-	if m.filePickerSelected < 0 || m.filePickerSelected >= len(m.filePickerEntries) {
-		return nil
-	}
-	return &m.filePickerEntries[m.filePickerSelected]
-}
-
-func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
-	cleanedDir := filepath.Clean(dir)
-	entries, err := os.ReadDir(cleanedDir)
-	if err != nil {
-		return nil, "", err
-	}
-	items := make([]filePickerEntry, 0, len(entries)+1)
-	for _, entry := range entries {
-		name := entry.Name()
-		var size int64
-		if !entry.IsDir() {
-			if info, err := entry.Info(); err == nil {
-				size = info.Size()
-			}
-		}
-		items = append(items, filePickerEntry{
-			Name:  name,
-			Path:  filepath.Join(cleanedDir, name),
-			IsDir: entry.IsDir(),
-			Size:  size,
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].IsDir != items[j].IsDir {
-			return items[i].IsDir
-		}
-		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-	})
-	// Prepend a synthetic ".." entry unless we're already at the filesystem
-	// root so backspace-less users can navigate up with ⏎.
-	if parent := filepath.Dir(cleanedDir); parent != cleanedDir {
-		items = append([]filePickerEntry{{
-			Name:     "..",
-			Path:     parent,
-			IsDir:    true,
-			IsParent: true,
-		}}, items...)
-	}
-	return items, cleanedDir, nil
-}
-
-// formatFileSize renders a byte count as a short human-readable string:
-// "473 B", "12.3 KB", "4.1 MB", "2.7 GB".
-func formatFileSize(bytes int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-		GB = 1024 * MB
-	)
-	switch {
-	case bytes < KB:
-		return fmt.Sprintf("%d B", bytes)
-	case bytes < MB:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/KB)
-	case bytes < GB:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/MB)
-	default:
-		return fmt.Sprintf("%.1f GB", float64(bytes)/GB)
-	}
-}
-
-func (m *Model) renderFilePicker(width int) string {
-	title := style.Bold.Render("Attach File")
-	dirLine := style.Muted.Render(m.filePickerDir)
-	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
-	lines := []string{title, dirLine, hint, ""}
-	modalWidth := min(max(48, width-6), width)
-	rowWidth := max(1, modalWidth-6)
-	visibleEntries, hiddenAbove, hiddenBelow := m.filePickerVisibleEntries(max(1, m.height-12))
-	if len(m.filePickerEntries) == 0 {
-		lines = append(lines, style.Muted.Render("(empty) — backspace to go up"))
-	} else {
-		if hiddenAbove {
-			lines = append(lines, style.Muted.Render("..."))
-		}
-		for _, visible := range visibleEntries {
-			lines = append(lines, m.renderFilePickerRow(visible.entry, visible.index == m.filePickerSelected, rowWidth))
-		}
-		if hiddenBelow {
-			lines = append(lines, style.Muted.Render("..."))
-		}
-	}
-	modalHeight := max(8, m.height-4)
-	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
-}
-
-// renderFilePickerRow lays out "name   size" so file sizes are right-aligned
-// within the modal. Directories (including the synthetic "..") render in the
-// StatusOk color with no size; files render at default color with a muted
-// size suffix.
-func (m *Model) renderFilePickerRow(entry filePickerEntry, selected bool, width int) string {
-	label := entry.Name
-	if entry.IsDir {
-		label += string(filepath.Separator)
-	}
-	sizeStr := ""
-	if !entry.IsDir {
-		sizeStr = formatFileSize(entry.Size)
-	}
-	pad := width - lipgloss.Width(label) - lipgloss.Width(sizeStr)
-	if pad < 1 {
-		pad = 1
-	}
-	line := label + strings.Repeat(" ", pad) + style.Muted.Render(sizeStr)
-
-	rowStyle := lipgloss.NewStyle().Width(width)
-	if entry.IsDir {
-		rowStyle = rowStyle.Inherit(style.StatusOk)
-	}
-	if selected {
-		rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
-	}
-	return rowStyle.Render(line)
-}
-
-type filePickerVisibleEntry struct {
-	index int
-	entry filePickerEntry
-}
-
-func (m *Model) filePickerVisibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
-	if len(m.filePickerEntries) == 0 {
-		return nil, false, false
-	}
-	if maxEntries <= 0 || len(m.filePickerEntries) <= maxEntries {
-		visible := make([]filePickerVisibleEntry, 0, len(m.filePickerEntries))
-		for idx, entry := range m.filePickerEntries {
-			visible = append(visible, filePickerVisibleEntry{index: idx, entry: entry})
-		}
-		return visible, false, false
-	}
-	start := m.filePickerSelected - (maxEntries / 2)
-	if start < 0 {
-		start = 0
-	}
-	end := start + maxEntries
-	if end > len(m.filePickerEntries) {
-		end = len(m.filePickerEntries)
-		start = end - maxEntries
-	}
-	visible := make([]filePickerVisibleEntry, 0, end-start)
-	for idx := start; idx < end; idx++ {
-		visible = append(visible, filePickerVisibleEntry{index: idx, entry: m.filePickerEntries[idx]})
-	}
-	return visible, start > 0, end < len(m.filePickerEntries)
-}
-
-func attachmentLabel(attachmentType string) string {
-	switch attachmentType {
-	case attachmentModePhoto:
-		return "photo"
-	case attachmentModeVoice:
-		return "voice note"
-	case attachmentModeFile:
-		return "file"
-	default:
-		return "attachment"
-	}
 }
