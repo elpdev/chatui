@@ -29,7 +29,7 @@ func (m *Model) View() string {
 		return m.renderHelpModal(view)
 	}
 	if m.addContact.open {
-		return m.renderAddContactModal(view)
+		return m.addContact.Overlay(view, m.width, m.height)
 	}
 	if m.peerDetailOpen {
 		return m.renderPeerDetailModal(view)

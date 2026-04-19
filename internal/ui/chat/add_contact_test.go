@@ -136,19 +136,17 @@ func newChatModel(t *testing.T, mailbox string, relay *fakeRelayClient, relayURL
 	return model, service
 }
 
-// drainMsg invokes the returned cmd if non-nil, then feeds any resulting
-// message back into Update. Returns whatever final cmd the Update returned.
-// Used where the test doesn't care about further chained commands.
+// drainMsg invokes the returned cmd if non-nil, then keeps feeding resulting
+// messages back into Update until the command chain settles.
 func drainMsg(t *testing.T, model *Model, cmd tea.Cmd) {
 	t.Helper()
-	if cmd == nil {
-		return
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			return
+		}
+		_, cmd = model.Update(msg)
 	}
-	msg := cmd()
-	if msg == nil {
-		return
-	}
-	_, _ = model.Update(msg)
 }
 
 func TestAddContactLookupAppliesRelayDirectoryTrust(t *testing.T) {
@@ -269,7 +267,7 @@ func TestAddContactInviteStartGeneratesCodeAndUploadsPayload(t *testing.T) {
 		t.Fatal("expected invite-start command")
 	}
 
-	// startCmd is tea.Batch(inviteStartedMsg-publisher, blocking-exchange).
+	// startCmd is tea.Batch(invite-started publisher, blocking exchange).
 	// Run the batch in a goroutine — the exchange call blocks on the gate.
 	doneCh := make(chan struct{})
 	go func() {
@@ -284,11 +282,11 @@ func TestAddContactInviteStartGeneratesCodeAndUploadsPayload(t *testing.T) {
 		}
 	}()
 
-	// Drain the inviteStartedMsg synchronously: pop the first branch of the
+	// Drain the invite-started message synchronously: pop the first branch of the
 	// batch (which returns immediately) by replaying the message generator.
 	// We re-call the start-cmd closure by extracting what we need from the
 	// gated relay instead.
-	_, _ = model.Update(inviteStartedMsg{code: model.addContact.code})
+	_, _ = model.Update(addContactInviteStartedMsg{code: model.addContact.code})
 
 	// Wait for the Put to land so we know Exchange reached the poll loop.
 	deadline := time.Now().Add(time.Second)
@@ -368,9 +366,9 @@ func TestAddContactInviteEscCancelsPolling(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("invite-exchange cmd never completed after cancel")
 	}
-	result, ok := msg.(inviteExchangeResultMsg)
+	result, ok := msg.(addContactInviteExchangeResultMsg)
 	if !ok {
-		t.Fatalf("expected inviteExchangeResultMsg, got %T", msg)
+		t.Fatalf("expected addContactInviteExchangeResultMsg, got %T", msg)
 	}
 	if !result.cancelled {
 		t.Fatalf("expected cancelled=true, got err=%v", result.err)
