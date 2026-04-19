@@ -18,9 +18,6 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	if m.filePicker.open {
 		return m, m.updateFilePicker(msg)
 	}
-	if m.addContact.open {
-		return m.handleAddContactKey(msg)
-	}
 	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
 		m.helpOpen = true
 		return m, nil
@@ -197,53 +194,5 @@ func (m *Model) handleTypingSendResultMsg(msg typingSendResultMsg) (*Model, tea.
 	if msg.err != nil {
 		m.pushToast(fmt.Sprintf("typing indicator failed: %v", msg.err), ToastBad)
 	}
-	return m, nil
-}
-
-func (m *Model) handleAddContactResultMsg(msg addContactResultMsg) (*Model, tea.Cmd) {
-	m.addContact.busy = false
-	m.addContact.cancel = nil
-	if msg.err != nil {
-		m.addContact.error = msg.err.Error()
-		return m, nil
-	}
-	m.finishAddContact(msg.contact, fmt.Sprintf("added verified contact %s", msg.contact.AccountID))
-	return m, nil
-}
-
-func (m *Model) handleLookupContactResultMsg(msg lookupContactResultMsg) (*Model, tea.Cmd) {
-	m.addContact.busy = false
-	m.addContact.cancel = nil
-	if msg.err != nil {
-		m.addContact.error = msg.err.Error()
-		return m, nil
-	}
-	m.finishAddContact(msg.contact, fmt.Sprintf("added relay-directory contact %s", msg.contact.AccountID))
-	return m, nil
-}
-
-func (m *Model) handleInviteExchangeResultMsg(msg inviteExchangeResultMsg) (*Model, tea.Cmd) {
-	m.addContact.busy = false
-	m.addContact.cancel = nil
-	if msg.cancelled {
-		m.addContact.error = "cancelled"
-		return m, nil
-	}
-	if msg.err != nil {
-		m.addContact.error = msg.err.Error()
-		return m, nil
-	}
-	m.finishAddContact(msg.contact, fmt.Sprintf("added invite-code contact %s", msg.contact.AccountID))
-	return m, nil
-}
-
-func (m *Model) handleInviteStartedMsg(msg inviteStartedMsg) (*Model, tea.Cmd) {
-	if msg.err != nil {
-		m.addContact.busy = false
-		m.addContact.cancel = nil
-		m.addContact.error = msg.err.Error()
-		return m, nil
-	}
-	m.addContact.code = msg.code
 	return m, nil
 }

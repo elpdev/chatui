@@ -244,7 +244,8 @@ func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
 		t.Fatalf("expected add contact modal in view: %q", view)
 	}
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	drainMsg(t, model, cmd)
 	if model.addContact.open {
 		t.Fatal("expected add contact modal to close")
 	}
@@ -293,11 +294,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected import command")
 	}
-	msg := cmd()
-	if msg == nil {
-		t.Fatal("expected import result message")
-	}
-	_, _ = model.Update(msg)
+	drainMsg(t, model, cmd)
 
 	if model.addContact.open {
 		t.Fatal("expected add contact modal to close after import")
@@ -367,7 +364,7 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected import command")
 	}
-	_, _ = model.Update(cmd())
+	drainMsg(t, model, cmd)
 	if model.recipientMailbox != "bob" {
 		t.Fatalf("expected verbose invite paste to import bob, got %q", model.recipientMailbox)
 	}

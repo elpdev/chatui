@@ -42,7 +42,7 @@ type Model struct {
 	peerTrustSource    string
 	typing             typingState
 	filePicker         filePickerState
-	addContact         addContactState
+	addContact         addContactModal
 	helpOpen           bool
 	peerDetailOpen     bool
 	focus              focusState
@@ -84,6 +84,11 @@ func New(deps Deps) *Model {
 		filePicker:         filePickerState{dir: defaultFilePickerDir()},
 		unread:             map[string]int{},
 	}
+	m.addContact = newAddContactModal(addContactDeps{
+		messaging:         deps.Messaging,
+		ensureRelayClient: m.ensureRelayClient,
+		relayConfigured:   m.relayConfigured,
+	})
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
@@ -125,11 +130,19 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
+	if handled, cmd := m.updateAddContact(msg); handled {
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if next, cmd := m.handleKeyMsg(msg); next != nil {
 			return next, cmd
 		}
+	case addContactCompletedMsg:
+		return m.handleAddContactCompletedMsg(msg)
+	case addContactClosedMsg:
+		return m.handleAddContactClosedMsg(msg)
 	case clientEventMsg:
 		return m.handleClientEventMsg(msg)
 	case connectResultMsg:
@@ -142,14 +155,6 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleSendResultMsg(msg)
 	case typingSendResultMsg:
 		return m.handleTypingSendResultMsg(msg)
-	case addContactResultMsg:
-		return m.handleAddContactResultMsg(msg)
-	case lookupContactResultMsg:
-		return m.handleLookupContactResultMsg(msg)
-	case inviteExchangeResultMsg:
-		return m.handleInviteExchangeResultMsg(msg)
-	case inviteStartedMsg:
-		return m.handleInviteStartedMsg(msg)
 	}
 
 	previousValue := m.input.Value()

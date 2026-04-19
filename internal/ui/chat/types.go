@@ -3,7 +3,6 @@ package chat
 import (
 	"time"
 
-	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/transport"
@@ -109,27 +108,6 @@ type connectResultMsg struct{ err error }
 type reconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
-
-type addContactResultMsg struct {
-	contact *identity.Contact
-	err     error
-}
-
-type lookupContactResultMsg struct {
-	contact *identity.Contact
-	err     error
-}
-
-type inviteExchangeResultMsg struct {
-	contact   *identity.Contact
-	err       error
-	cancelled bool
-}
-
-type inviteStartedMsg struct {
-	code string
-	err  error
-}
 
 type sendResultMsg struct {
 	recipient string
