@@ -1107,6 +1107,64 @@ func TestConnectionStateReflectsFlags(t *testing.T) {
 	}
 }
 
+func TestUnreadCountTracksOffChatMessagesAndClearsOnOpen(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	bobContact.Verified = true
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: aliceService,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+
+	// Two unread arrivals while bob isn't the active chat.
+	model.markUnread("bob")
+	model.markUnread("bob")
+	if got := model.Unread("bob"); got != 2 {
+		t.Fatalf("expected 2 unread from bob, got %d", got)
+	}
+	view := model.View()
+	if !strings.Contains(view, "●2") {
+		t.Fatalf("expected unread badge ●2 in sidebar: %q", view)
+	}
+
+	// Opening bob's chat clears the badge.
+	model.selectContact("bob")
+	if !model.activateSelectedContact() {
+		t.Fatal("expected bob chat to activate")
+	}
+	if got := model.Unread("bob"); got != 0 {
+		t.Fatalf("expected unread cleared after opening chat, got %d", got)
+	}
+	if strings.Contains(model.View(), "●2") {
+		t.Fatalf("expected unread badge cleared from sidebar: %q", model.View())
+	}
+
+	// markUnread is a no-op for the active chat.
+	model.markUnread("bob")
+	if got := model.Unread("bob"); got != 0 {
+		t.Fatalf("expected markUnread on active chat to be no-op, got %d", got)
+	}
+}
+
 func mustPhotoBytes(t *testing.T) []byte {
 	t.Helper()
 	bytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zl9sAAAAASUVORK5CYII=")

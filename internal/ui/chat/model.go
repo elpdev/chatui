@@ -76,6 +76,7 @@ type Model struct {
 	addContactError     string
 	addContactImporting bool
 	addContactOpen      bool
+	unread              map[string]int
 	toast               *toastState
 	width               int
 	height              int
@@ -165,6 +166,7 @@ func New(deps Deps) *Model {
 		connecting:       true,
 		selectedIndex:    -1,
 		filePickerDir:    defaultFilePickerDir(),
+		unread:           map[string]int{},
 	}
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
@@ -522,6 +524,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			m.syncViewport()
 			return
 		}
+		m.markUnread(result.PeerAccountID)
 		m.pushToast(fmt.Sprintf("new message from %s", result.PeerAccountID), ToastInfo)
 	case protocol.MessageTypeError:
 		if msg.Error != nil {
@@ -763,12 +766,41 @@ func (m *Model) activateSelectedContact() bool {
 		return false
 	}
 	m.recipientMailbox = m.contacts[m.selectedIndex].Mailbox
+	m.clearUnread(m.recipientMailbox)
 	m.syncRecipientDetails()
 	m.clearPeerTyping()
 	m.loadHistory()
 	m.syncViewport()
 	m.syncInputPlaceholder()
 	return true
+}
+
+// markUnread increments the unread count for a peer. No-op for the currently
+// open chat (those messages are visible already).
+func (m *Model) markUnread(peer string) {
+	if peer == "" || peer == m.recipientMailbox {
+		return
+	}
+	if m.unread == nil {
+		m.unread = map[string]int{}
+	}
+	m.unread[peer]++
+}
+
+// clearUnread resets the unread count for a peer. Called on chat open.
+func (m *Model) clearUnread(peer string) {
+	if m.unread == nil {
+		return
+	}
+	delete(m.unread, peer)
+}
+
+// Unread returns the unread-message count for a peer, or zero.
+func (m *Model) Unread(peer string) int {
+	if m.unread == nil {
+		return 0
+	}
+	return m.unread[peer]
 }
 
 func (m *Model) loadHistory() {
@@ -857,28 +889,52 @@ func (m *Model) renderSidebar() string {
 	}
 	lines := []string{title, style.Muted.Render(shortcut)}
 	if len(m.contacts) == 0 {
-		lines = append(lines, style.Muted.Render("No contacts yet."))
-		lines = append(lines, style.Muted.Render("Press ctrl+n to add one here."))
+		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+n."))
 		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
 	}
 	for idx, contact := range m.contacts {
-		mailboxStyle := lipgloss.NewStyle()
-		if idx == m.selectedIndex {
-			mailboxStyle = style.Selected
-		}
-		if contact.Mailbox == m.recipientMailbox {
-			mailboxStyle = style.PeerAccentStyle(contact.Fingerprint).Bold(true)
-		}
-		statusStyle := style.UnverifiedWarn
-		statusText := "unverified"
-		if contact.Verified {
-			statusStyle = style.VerifiedOk
-			statusText = "verified"
-		}
-		line := fmt.Sprintf("%s  %s", mailboxStyle.Render(contact.Mailbox), statusStyle.Render(statusText))
-		lines = append(lines, line)
+		lines = append(lines, m.renderSidebarRow(idx, contact))
 	}
 	return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
+	isCursor := idx == m.selectedIndex
+	isActive := contact.Mailbox == m.recipientMailbox
+
+	// Leading marker column is always 2 characters wide so rows stay aligned:
+	//   "▌●" cursor on active, "▌ " cursor only, " ●" active only, "  " none.
+	cursorGlyph := " "
+	if isCursor {
+		cursorGlyph = style.PeerAccentStyle(contact.Fingerprint).Render(style.GlyphCursorRow)
+	}
+	activeGlyph := " "
+	if isActive {
+		activeGlyph = style.StatusOk.Render(style.GlyphActiveChat)
+	}
+	marker := cursorGlyph + activeGlyph
+
+	// Mailbox takes peer accent + bold when active, default foreground otherwise.
+	mailbox := contact.Mailbox
+	if isActive {
+		mailbox = style.PeerAccentStyle(contact.Fingerprint).Bold(true).Render(mailbox)
+	}
+
+	// Unread badge ("●N") rendered only when positive.
+	badge := ""
+	if n := m.Unread(contact.Mailbox); n > 0 {
+		badge = " " + style.UnreadBadge.Render(fmt.Sprintf("%s%d", style.GlyphUnreadDot, n))
+	}
+
+	// Verification label on the right.
+	statusStyle := style.UnverifiedWarn
+	statusText := "unverified"
+	if contact.Verified {
+		statusStyle = style.VerifiedOk
+		statusText = "verified"
+	}
+
+	return fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, statusStyle.Render(statusText))
 }
 
 func (m *Model) renderConversation() string {
