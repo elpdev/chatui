@@ -17,6 +17,7 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type stubClient struct{}
@@ -172,8 +173,11 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if !model.peerVerified {
 		t.Fatal("expected active peer to be verified")
 	}
-	if len(model.messages) != 1 || !strings.Contains(model.messages[0], "hello from bob") {
-		t.Fatalf("expected bob history to load, got %+v", model.messages)
+	if len(model.messageItems) != 1 || model.messageItems[0].body != "hello from bob" {
+		t.Fatalf("expected bob history to load, got %+v", model.messageItems)
+	}
+	if !stringsContainsAny(model.messages, "hello from bob") {
+		t.Fatalf("expected rendered history to include body, got %+v", model.messages)
 	}
 	view = model.View()
 	if !strings.Contains(view, "bob") {
@@ -1163,6 +1167,90 @@ func TestUnreadCountTracksOffChatMessagesAndClearsOnOpen(t *testing.T) {
 	if got := model.Unread("bob"); got != 0 {
 		t.Fatalf("expected markUnread on active chat to be no-op, got %d", got)
 	}
+}
+
+func TestRenderMessagesGroupsByConsecutiveSender(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+	model.peerFingerprint = "abcd1234abcd1234"
+
+	t0 := time.Date(2026, 4, 19, 12, 34, 0, 0, time.UTC)
+	model.messageItems = []messageItem{
+		{direction: "outbound", sender: "alice", body: "hi", timestamp: t0, messageID: "m1", status: statusDelivered},
+		{direction: "outbound", sender: "alice", body: "one more thing", timestamp: t0.Add(20 * time.Second), messageID: "m2", status: statusSent},
+		{direction: "inbound", sender: "bob", body: "got it", timestamp: t0.Add(time.Minute)},
+	}
+	model.renderMessages()
+
+	// Expected shape: "you · HH:MM" header once, two body lines; then "bob · HH:MM" header, one body line.
+	joined := strings.Join(model.messages, "\n")
+	youHeaders := strings.Count(joined, "you")
+	bobHeaders := strings.Count(joined, "bob")
+	if youHeaders != 1 {
+		t.Fatalf("expected exactly one 'you' group header, got %d in %q", youHeaders, joined)
+	}
+	if bobHeaders != 1 {
+		t.Fatalf("expected exactly one 'bob' group header, got %d in %q", bobHeaders, joined)
+	}
+	if !strings.Contains(joined, "hi") || !strings.Contains(joined, "one more thing") || !strings.Contains(joined, "got it") {
+		t.Fatalf("expected all message bodies in rendered output, got %q", joined)
+	}
+	if !strings.Contains(joined, style.GlyphDeliveryDelivered) {
+		t.Fatalf("expected delivered glyph %q in output: %q", style.GlyphDeliveryDelivered, joined)
+	}
+}
+
+func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+
+	model.messageItems = []messageItem{
+		{direction: "outbound", sender: "alice", body: "hi", timestamp: time.Now(), messageID: "m1", status: statusSent},
+	}
+	model.renderMessages()
+	before := strings.Join(model.messages, "\n")
+	if !strings.Contains(before, style.GlyphDeliverySent) {
+		t.Fatalf("expected sent glyph before ack: %q", before)
+	}
+
+	if ok := model.updateMessageStatus("m1", statusDelivered); !ok {
+		t.Fatal("updateMessageStatus returned false for known messageID")
+	}
+	after := strings.Join(model.messages, "\n")
+	if !strings.Contains(after, style.GlyphDeliveryDelivered) {
+		t.Fatalf("expected delivered glyph after ack: %q", after)
+	}
+}
+
+func stringsContainsAny(lines []string, needle string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func mustPhotoBytes(t *testing.T) []byte {
