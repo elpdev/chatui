@@ -3,6 +3,9 @@ package chat
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +34,12 @@ type contactItem struct {
 	Verified    bool
 }
 
+type filePickerEntry struct {
+	Name  string
+	Path  string
+	IsDir bool
+}
+
 type Model struct {
 	client              transport.Client
 	messaging           *messaging.Service
@@ -56,6 +65,10 @@ type Model struct {
 	localTypingSent     bool
 	localTypingPeer     string
 	localTypingAt       time.Time
+	filePickerOpen      bool
+	filePickerDir       string
+	filePickerEntries   []filePickerEntry
+	filePickerSelected  int
 	width               int
 	height              int
 	sidebarWidth        int
@@ -78,6 +91,9 @@ const (
 	typingIdleTimeout       = 2 * time.Second
 	typingStateActive       = "active"
 	typingStateIdle         = "idle"
+	attachmentModePhoto     = "photo"
+	attachmentModeVoice     = "voice"
+	attachmentModeFile      = "file"
 )
 
 func New(deps Deps) *Model {
@@ -100,6 +116,7 @@ func New(deps Deps) *Model {
 		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
 		connecting:       true,
 		selectedIndex:    -1,
+		filePickerDir:    defaultFilePickerDir(),
 	}
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
@@ -122,12 +139,33 @@ func (m *Model) SetSize(width, height int) {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.filePickerOpen {
+			return m, m.updateFilePicker(msg)
+		}
 		switch msg.Type {
 		case tea.KeyUp:
 			m.moveSelection(-1)
 			return m, nil
 		case tea.KeyDown:
 			m.moveSelection(1)
+			return m, nil
+		case tea.KeyCtrlO:
+			if m.authFailed {
+				m.status = "cannot attach: relay auth failed; restart with --relay-token"
+				return m, nil
+			}
+			if m.recipientMailbox == "" {
+				m.status = "select a contact from the sidebar first"
+				return m, nil
+			}
+			if !m.connected {
+				m.status = "relay is not connected; waiting to reconnect"
+				return m, nil
+			}
+			if err := m.openFilePicker(); err != nil {
+				m.status = fmt.Sprintf("open file picker failed: %v", err)
+				return m, nil
+			}
 			return m, nil
 		case tea.KeyEnter:
 			body := strings.TrimSpace(m.input.Value())
@@ -156,16 +194,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 					m.status = "usage: /send-photo <path>"
 					return m, nil
 				}
-				batch, displayBody, err := m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
-				if err != nil {
-					m.status = err.Error()
-					return m, nil
-				}
-				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
-				m.input.SetValue("")
-				m.resetLocalTypingState()
-				m.syncViewport()
-				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+				return m, m.sendAttachment(path, attachmentModePhoto)
 			}
 			if strings.HasPrefix(body, "/send-voice") {
 				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-voice")))
@@ -173,16 +202,15 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 					m.status = "usage: /send-voice <path>"
 					return m, nil
 				}
-				batch, displayBody, err := m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
-				if err != nil {
-					m.status = err.Error()
+				return m, m.sendAttachment(path, attachmentModeVoice)
+			}
+			if strings.HasPrefix(body, "/send-file") {
+				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-file")))
+				if path == "" {
+					m.status = "usage: /send-file <path>"
 					return m, nil
 				}
-				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
-				m.input.SetValue("")
-				m.resetLocalTypingState()
-				m.syncViewport()
-				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+				return m, m.sendAttachment(path, attachmentModeFile)
 			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
@@ -684,9 +712,13 @@ func (m *Model) renderConversation() string {
 		}
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(empty, "\n"))
 	}
+	if m.filePickerOpen {
+		return m.renderFilePicker(width)
+	}
 	header := []string{
 		lipgloss.NewStyle().Bold(true).Render(m.recipientMailbox),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf("fingerprint %s  %s", m.peerFingerprint, verificationLabel(m.peerVerified))),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("ctrl+o attach file  |  /send-photo <path>  |  /send-voice <path>"),
 		m.viewport.View(),
 		m.renderTypingIndicator(),
 		m.input.View(),
@@ -793,4 +825,198 @@ func (m *Model) clearPeerTyping() {
 	m.peerTyping = false
 	m.peerTypingExpiresAt = time.Time{}
 	m.typingFrame = 0
+}
+
+func defaultFilePickerDir() string {
+	if dir, err := os.Getwd(); err == nil && dir != "" {
+		return dir
+	}
+	if dir, err := os.UserHomeDir(); err == nil && dir != "" {
+		return dir
+	}
+	return string(filepath.Separator)
+}
+
+func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
+	var (
+		batch       *messaging.OutgoingBatch
+		displayBody string
+		err         error
+	)
+	switch attachmentType {
+	case attachmentModePhoto:
+		batch, displayBody, err = m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
+	case attachmentModeVoice:
+		batch, displayBody, err = m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
+	case attachmentModeFile:
+		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.recipientMailbox, path)
+	default:
+		m.status = fmt.Sprintf("unsupported attachment type %q", attachmentType)
+		return nil
+	}
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+	m.input.SetValue("")
+	m.resetLocalTypingState()
+	m.syncViewport()
+	m.status = fmt.Sprintf("sending %s to %s", attachmentLabel(attachmentType), m.recipientMailbox)
+	return m.sendCmd(m.recipientMailbox, displayBody, batch)
+}
+
+func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeFilePicker("file picker closed")
+		return nil
+	case tea.KeyBackspace:
+		if err := m.goToParentDirectory(); err != nil {
+			m.status = fmt.Sprintf("file picker failed: %v", err)
+		}
+		return nil
+	case tea.KeyUp:
+		m.moveFilePickerSelection(-1)
+		return nil
+	case tea.KeyDown:
+		m.moveFilePickerSelection(1)
+		return nil
+	case tea.KeyEnter:
+		entry := m.selectedFilePickerEntry()
+		if entry == nil {
+			return nil
+		}
+		if entry.IsDir {
+			if err := m.openFilePickerAt(entry.Path); err != nil {
+				m.status = fmt.Sprintf("open directory failed: %v", err)
+			}
+			return nil
+		}
+		m.closeFilePicker(fmt.Sprintf("selected %s", entry.Name))
+		return m.sendAttachment(entry.Path, attachmentModeFile)
+	}
+	return nil
+}
+
+func (m *Model) openFilePicker() error {
+	return m.openFilePickerAt(m.filePickerDir)
+}
+
+func (m *Model) openFilePickerAt(dir string) error {
+	entries, cleanedDir, err := readFilePickerEntries(dir)
+	if err != nil {
+		return err
+	}
+	m.filePickerOpen = true
+	m.filePickerDir = cleanedDir
+	m.filePickerEntries = entries
+	m.filePickerSelected = 0
+	m.input.Blur()
+	m.status = fmt.Sprintf("attach a file for %s", m.recipientMailbox)
+	return nil
+}
+
+func (m *Model) closeFilePicker(status string) {
+	m.filePickerOpen = false
+	m.filePickerEntries = nil
+	m.filePickerSelected = 0
+	m.input.Focus()
+	if status != "" {
+		m.status = status
+	}
+}
+
+func (m *Model) goToParentDirectory() error {
+	parent := filepath.Dir(m.filePickerDir)
+	if parent == m.filePickerDir {
+		return nil
+	}
+	return m.openFilePickerAt(parent)
+}
+
+func (m *Model) moveFilePickerSelection(delta int) {
+	if len(m.filePickerEntries) == 0 {
+		return
+	}
+	m.filePickerSelected += delta
+	if m.filePickerSelected < 0 {
+		m.filePickerSelected = 0
+	}
+	if m.filePickerSelected >= len(m.filePickerEntries) {
+		m.filePickerSelected = len(m.filePickerEntries) - 1
+	}
+}
+
+func (m *Model) selectedFilePickerEntry() *filePickerEntry {
+	if m.filePickerSelected < 0 || m.filePickerSelected >= len(m.filePickerEntries) {
+		return nil
+	}
+	return &m.filePickerEntries[m.filePickerSelected]
+}
+
+func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
+	cleanedDir := filepath.Clean(dir)
+	entries, err := os.ReadDir(cleanedDir)
+	if err != nil {
+		return nil, "", err
+	}
+	items := make([]filePickerEntry, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		items = append(items, filePickerEntry{
+			Name:  name,
+			Path:  filepath.Join(cleanedDir, name),
+			IsDir: entry.IsDir(),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsDir != items[j].IsDir {
+			return items[i].IsDir
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+	return items, cleanedDir, nil
+}
+
+func (m *Model) renderFilePicker(width int) string {
+	title := lipgloss.NewStyle().Bold(true).Render("Attach File")
+	dirLine := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(m.filePickerDir)
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("enter open/select  |  backspace up  |  esc cancel")
+	lines := []string{title, dirLine, hint, ""}
+	if len(m.filePickerEntries) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("This directory is empty."))
+	} else {
+		for idx, entry := range m.filePickerEntries {
+			label := entry.Name
+			if entry.IsDir {
+				label += string(filepath.Separator)
+			}
+			style := lipgloss.NewStyle()
+			if entry.IsDir {
+				style = style.Foreground(lipgloss.Color("86"))
+			}
+			if idx == m.filePickerSelected {
+				style = style.Background(lipgloss.Color("238")).Bold(true)
+			}
+			lines = append(lines, style.Render(label))
+		}
+	}
+	modalWidth := min(max(48, width-6), width)
+	modalHeight := max(8, m.height-4)
+	modal := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+}
+
+func attachmentLabel(attachmentType string) string {
+	switch attachmentType {
+	case attachmentModePhoto:
+		return "photo"
+	case attachmentModeVoice:
+		return "voice note"
+	case attachmentModeFile:
+		return "file"
+	default:
+		return "attachment"
+	}
 }

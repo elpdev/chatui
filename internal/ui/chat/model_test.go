@@ -496,6 +496,206 @@ func TestSendVoiceCommandAcceptsEscapedSpacesInPath(t *testing.T) {
 	}
 }
 
+func TestSendFileCommandQueuesAttachmentBatch(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	filePath := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(filePath, []byte("hello from file"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.input.SetValue("/send-file " + filePath)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected file send to produce envelopes")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
+	}
+	found := false
+	for _, message := range model.messages {
+		if strings.Contains(message, "file sent: notes.txt") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected sent file message in history: %+v", model.messages)
+	}
+}
+
+func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	pickerDir := t.TempDir()
+	filePath := filepath.Join(pickerDir, "draft.txt")
+	if err := os.WriteFile(filePath, []byte("draft body"), 0o600); err != nil {
+		t.Fatalf("write picker file: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.SetSize(100, 20)
+	model.filePickerDir = pickerDir
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd != nil {
+		t.Fatal("expected modal open without async command")
+	}
+	if !model.filePickerOpen {
+		t.Fatal("expected file picker to open")
+	}
+	if !strings.Contains(model.View(), "Attach File") {
+		t.Fatalf("expected modal title in view: %q", model.View())
+	}
+
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected send command from picker selection")
+	}
+	if model.filePickerOpen {
+		t.Fatal("expected file picker to close after selecting a file")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected picker send to produce envelopes")
+	}
+	if model.status != "selected draft.txt" && !strings.Contains(model.status, "sending file") {
+		t.Fatalf("unexpected status after picker send: %q", model.status)
+	}
+	found := false
+	for _, message := range model.messages {
+		if strings.Contains(message, "file sent: draft.txt") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected picker file message in history: %+v", model.messages)
+	}
+}
+
+func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	pickerRoot := t.TempDir()
+	childDir := filepath.Join(pickerRoot, "photos")
+	if err := os.Mkdir(childDir, 0o700); err != nil {
+		t.Fatalf("mkdir child dir: %v", err)
+	}
+
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.SetSize(100, 20)
+	model.filePickerDir = pickerRoot
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if !model.filePickerOpen {
+		t.Fatal("expected file picker to open")
+	}
+	if model.selectedFilePickerEntry() == nil || !model.selectedFilePickerEntry().IsDir {
+		t.Fatalf("expected first picker entry to be the child directory, got %+v", model.selectedFilePickerEntry())
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.filePickerDir != childDir {
+		t.Fatalf("expected picker to enter child dir, got %q", model.filePickerDir)
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if model.filePickerDir != pickerRoot {
+		t.Fatalf("expected picker to return to root dir, got %q", model.filePickerDir)
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.filePickerOpen {
+		t.Fatal("expected file picker to close on escape")
+	}
+	if model.status != "file picker closed" {
+		t.Fatalf("unexpected picker close status: %q", model.status)
+	}
+}
+
 func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := messaging.New(aliceStore, "alice")

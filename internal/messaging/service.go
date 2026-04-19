@@ -146,6 +146,10 @@ func (s *Service) PrepareVoiceOutgoing(recipientAccountID, path string) (*Outgoi
 	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeVoice)
 }
 
+func (s *Service) PrepareFileOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeFile)
+}
+
 func (s *Service) TypingEnvelopes(recipientAccountID, state string) ([]protocol.Envelope, error) {
 	switch state {
 	case typingStateActive, typingStateIdle:
@@ -289,7 +293,7 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 	if chunk == nil {
 		return "", false, fmt.Errorf("attachment payload is required")
 	}
-	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice {
+	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice && chunk.AttachmentType != attachmentTypeFile {
 		return "", false, fmt.Errorf("invalid attachment payload type")
 	}
 	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.TotalSize <= 0 || chunk.TotalSize > maxAttachmentSizeBytes || chunk.ChunkCount <= 0 || chunk.ChunkCount > maxAttachmentChunkCount || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
@@ -383,6 +387,8 @@ func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {
 			return nil
 		}
 		return fmt.Errorf("%s is not a supported audio file", path)
+	case attachmentTypeFile:
+		return nil
 	default:
 		return fmt.Errorf("unsupported attachment type %q", attachmentType)
 	}
@@ -408,6 +414,8 @@ func attachmentLabel(attachmentType string) string {
 		return "photo"
 	case attachmentTypeVoice:
 		return "voice note"
+	case attachmentTypeFile:
+		return "file"
 	default:
 		return "attachment"
 	}
