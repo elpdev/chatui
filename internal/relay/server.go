@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	_ "embed"
@@ -51,6 +52,8 @@ type subscriber struct {
 }
 
 const genericClientError = "request rejected"
+const mailboxNotPublishedError = "publish your signed relay directory entry before connecting"
+const mailboxNotAuthorizedError = "device is not authorized for this mailbox"
 const subscribeChallengeTTL = 30 * time.Second
 const rendezvousTTL = 10 * time.Minute
 const maxRendezvousPayloads = 2
@@ -133,12 +136,14 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := relayapi.VerifySignedDirectoryEntry(entry); err != nil {
-			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			s.logger.Warn("reject directory entry", "mailbox", mailbox, "error", err)
+			s.writeJSONError(w, http.StatusBadRequest, "invalid directory entry")
 			return
 		}
 		if err := s.queue.PutDirectoryEntry(entry); err != nil {
 			if errors.Is(err, ErrDirectoryConflict) {
-				s.writeJSONError(w, http.StatusConflict, err.Error())
+				s.logger.Warn("reject directory entry conflict", "mailbox", mailbox, "error", err)
+				s.writeJSONError(w, http.StatusConflict, "directory entry conflicts with existing mailbox owner")
 				return
 			}
 			s.writeJSONError(w, http.StatusInternalServerError, "save directory entry")
@@ -179,7 +184,8 @@ func (s *Server) handleRendezvous(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := validateRendezvousPayload(request.Payload, time.Now().UTC(), s.options.MaxMessageBytes); err != nil {
-			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			s.logger.Warn("reject rendezvous payload", "id", id, "error", err)
+			s.writeJSONError(w, http.StatusBadRequest, "invalid rendezvous payload")
 			return
 		}
 		existing, err := s.queue.GetRendezvousPayloads(id, time.Now().UTC())
@@ -302,7 +308,7 @@ func (s *Server) handleSubscribeMessage(conn *websocket.Conn, remoteAddr string,
 	}
 	if err := s.verifySubscribeRequest(req, *challenge, now); err != nil {
 		s.logger.Warn("reject subscribe request", "mailbox", req.Mailbox, "error", err)
-		s.writeClientError(*current, conn, genericClientError)
+		s.writeClientError(*current, conn, subscribeErrorMessage(err))
 		*challenge = newSubscribeChallenge(now)
 		s.writeConn(*current, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: *challenge})
 		return err
@@ -394,10 +400,56 @@ func (s *Server) verifySubscribeRequest(req protocol.SubscribeRequest, challenge
 	if !ed25519.Verify(ed25519.PublicKey(signingPublic), protocol.SubscribeProofBytes(req.Mailbox, req.ChallengeNonce, req.ChallengeExpiresAt), proof) {
 		return fmt.Errorf("invalid device proof")
 	}
+	if err := s.verifyMailboxOwnership(req.Mailbox, signingPublic); err != nil {
+		return err
+	}
 	if err := s.queue.AuthorizeMailbox(req.Mailbox, signingPublic); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) verifyMailboxOwnership(mailbox string, signingPublic []byte) error {
+	accountMailbox, err := s.queue.LookupMailboxAccount(mailbox)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf(mailboxNotPublishedError)
+		}
+		return fmt.Errorf("lookup mailbox owner: %w", err)
+	}
+	entry, err := s.queue.GetDirectoryEntry(accountMailbox)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf(mailboxNotPublishedError)
+		}
+		return fmt.Errorf("load directory entry: %w", err)
+	}
+	if err := relayapi.VerifySignedDirectoryEntry(*entry); err != nil {
+		return fmt.Errorf("verify directory entry: %w", err)
+	}
+	for _, device := range entry.Entry.Bundle.Devices {
+		if device.Revoked {
+			continue
+		}
+		if device.Mailbox != mailbox {
+			continue
+		}
+		if bytes.Equal(device.SigningPublic, signingPublic) {
+			return nil
+		}
+	}
+	return fmt.Errorf(mailboxNotAuthorizedError)
+}
+
+func subscribeErrorMessage(err error) string {
+	if err == nil {
+		return genericClientError
+	}
+	message := err.Error()
+	if message == mailboxNotPublishedError || message == mailboxNotAuthorizedError {
+		return message
+	}
+	return genericClientError
 }
 
 func newSubscribeChallenge(now time.Time) *protocol.SubscribeChallenge {

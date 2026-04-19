@@ -17,6 +17,7 @@ import (
 )
 
 const authHeader = "X-Pando-Relay-Token"
+const unpublishedMailboxError = "publish your signed relay directory entry before connecting"
 
 type Client struct {
 	url     string
@@ -91,6 +92,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 	if err := c.readSubscribeAck(conn); err != nil {
 		_ = conn.Close()
+		if err.Error() == unpublishedMailboxError {
+			return fmt.Errorf("%s: run `pando contact publish-directory --mailbox %s`", err.Error(), c.mailbox)
+		}
 		return err
 	}
 

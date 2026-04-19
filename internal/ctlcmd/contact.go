@@ -211,7 +211,16 @@ func runPublishDirectory(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken); err != nil {
+		return err
+	}
+	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
+	return nil
+}
+
+func publishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string) error {
+	client, err := relayapi.NewClient(relayURL, relayToken)
 	if err != nil {
 		return err
 	}
@@ -227,8 +236,6 @@ func runPublishDirectory(args []string) error {
 	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
 		return err
 	}
-	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
-	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
 	return nil
 }
 
