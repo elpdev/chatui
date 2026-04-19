@@ -51,7 +51,7 @@ nfpms:
     vendor: elpdev
     homepage: https://github.com/elpdev/pando
     maintainer: elpdev <noreply@github.com>
-    description: "Pando — encrypted peer-to-peer chat (TUI client, relay, and CLI)"
+    description: "Pando — end-to-end encrypted chat over self-hosted relays (TUI client, relay, and CLI)"
     license: MIT
     formats: [deb, rpm]
 
@@ -67,7 +67,7 @@ brews:
       email: bot@goreleaser.com
     commit_msg_template: "chore: update pando formula to {{ .Tag }}"
     homepage: https://github.com/elpdev/pando
-    description: "Pando — encrypted peer-to-peer chat"
+    description: "Pando — end-to-end encrypted chat over self-hosted relays"
     license: MIT
     install: |
       bin.install "pando"
@@ -78,7 +78,7 @@ aurs:
   - name: pando-bin
     ids: [pando-archive]
     homepage: https://github.com/elpdev/pando
-    description: "Pando — encrypted peer-to-peer chat"
+    description: "Pando — end-to-end encrypted chat over self-hosted relays"
     maintainers: ["elpdev <noreply@github.com>"]
     license: MIT
     private_key: "{{ .Env.AUR_KEY }}"
