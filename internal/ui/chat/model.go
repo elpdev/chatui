@@ -36,6 +36,30 @@ type contactItem struct {
 	Verified    bool
 }
 
+// messageItem is one rendered chat message. We keep these as structured records
+// so the grouped renderer can reason about sender/time/delivery state without
+// having to parse strings.
+type messageItem struct {
+	direction    string // "outbound" | "inbound"
+	sender       string // mailbox that authored the message
+	body         string
+	timestamp    time.Time
+	messageID    string
+	status       deliveryStatus
+	isAttachment bool
+}
+
+// deliveryStatus is a four-state outbound lifecycle. Inbound messages ignore
+// it.
+type deliveryStatus int
+
+const (
+	statusPending   deliveryStatus = iota // optimistic local append, awaiting relay round-trip
+	statusSent                            // send succeeded; waiting for recipient ack
+	statusDelivered                       // peer acked
+	statusFailed                          // send returned an error
+)
+
 type filePickerEntry struct {
 	Name  string
 	Path  string
@@ -52,6 +76,7 @@ type Model struct {
 	viewport            viewport.Model
 	contacts            []contactItem
 	selectedIndex       int
+	messageItems        []messageItem
 	messages            []string
 	status              string
 	connecting          bool
@@ -259,7 +284,14 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.pushToast(err.Error(), ToastBad)
 				return m, nil
 			}
-			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
+			m.appendMessageItem(messageItem{
+				direction: "outbound",
+				sender:    m.mailbox,
+				body:      body,
+				timestamp: time.Now().UTC(),
+				messageID: batchMessageID(batch),
+				status:    statusPending,
+			})
 			m.input.SetValue("")
 			m.resetLocalTypingState()
 			m.syncViewport()
@@ -306,6 +338,8 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
 	case sendResultMsg:
 		if msg.err != nil {
+			m.updateMessageStatus(msg.messageID, statusFailed)
+			m.syncViewport()
 			m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
 			return m, nil
 		}
@@ -314,7 +348,11 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.recipient == m.recipientMailbox {
-			m.loadHistory()
+			if !m.updateMessageStatus(msg.messageID, statusSent) {
+				// Optimistic item wasn't found (e.g. the chat changed mid-send);
+				// fall back to a full reload from disk.
+				m.loadHistory()
+			}
 			m.syncViewport()
 		}
 		return m, nil
@@ -506,10 +544,11 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			}
 			if result.MessageID != "" {
 				if result.PeerAccountID == m.recipientMailbox {
-					m.loadHistory()
+					if !m.updateMessageStatus(result.MessageID, statusDelivered) {
+						m.loadHistory()
+					}
 					m.syncViewport()
 				}
-				m.pushToast(fmt.Sprintf("delivery acknowledged for %s", result.MessageID), ToastInfo)
 			}
 			return
 		}
@@ -519,8 +558,14 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		}
 		if result.PeerAccountID == m.recipientMailbox {
 			m.clearPeerTyping()
-			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
-			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
+			m.appendMessageItem(messageItem{
+				direction:    "inbound",
+				sender:       msg.Incoming.SenderMailbox,
+				body:         result.Body,
+				timestamp:    msg.Incoming.Timestamp,
+				messageID:    result.MessageID,
+				isAttachment: attachmentBodyPattern(result.Body),
+			})
 			m.syncViewport()
 			return
 		}
@@ -804,6 +849,7 @@ func (m *Model) Unread(peer string) int {
 }
 
 func (m *Model) loadHistory() {
+	m.messageItems = nil
 	m.messages = nil
 	if m.recipientMailbox == "" {
 		m.syncViewport()
@@ -815,22 +861,158 @@ func (m *Model) loadHistory() {
 		return
 	}
 	for _, record := range records {
-		ts := record.Timestamp.Format(time.Kitchen)
-		if record.Direction == "outbound" {
-			status := "pending"
-			if record.Delivered {
-				status = "delivered"
-			}
-			m.messages = append(m.messages, fmt.Sprintf("[%s] you -> %s [%s]: %s", ts, m.recipientMailbox, status, record.Body))
-			continue
+		item := messageItem{
+			direction:    record.Direction,
+			body:         record.Body,
+			timestamp:    record.Timestamp,
+			messageID:    record.MessageID,
+			isAttachment: attachmentBodyPattern(record.Body),
 		}
-		m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, record.PeerMailbox, m.mailbox, record.Body))
+		if record.Direction == "outbound" {
+			item.sender = m.mailbox
+			item.status = statusSent
+			if record.Delivered {
+				item.status = statusDelivered
+			}
+		} else {
+			item.sender = record.PeerMailbox
+		}
+		m.messageItems = append(m.messageItems, item)
 	}
-	if len(m.messages) == 0 {
-		m.viewport.SetContent("No messages yet.")
+	if len(m.messageItems) == 0 {
+		m.viewport.SetContent(style.Muted.Render("No messages yet."))
 		return
 	}
+	m.renderMessages()
 	m.syncViewport()
+}
+
+// appendMessageItem appends a new message and refreshes the derived string
+// slice. Used by the optimistic-append paths (enter-to-send, attachments,
+// incoming messages in the active chat).
+func (m *Model) appendMessageItem(item messageItem) {
+	m.messageItems = append(m.messageItems, item)
+	m.renderMessages()
+}
+
+// renderMessages rebuilds m.messages from m.messageItems. Consecutive messages
+// from the same sender within groupGap are collapsed under a single
+// "name · HH:MM PM" header. Outbound messages show a right-aligned delivery
+// glyph.
+func (m *Model) renderMessages() {
+	const groupGap = 5 * time.Minute
+	m.messages = m.messages[:0]
+
+	var prevSender string
+	var prevTS time.Time
+	for i, item := range m.messageItems {
+		startGroup := i == 0 || item.sender != prevSender || item.timestamp.Sub(prevTS) > groupGap
+		if startGroup {
+			if i > 0 {
+				m.messages = append(m.messages, "")
+			}
+			m.messages = append(m.messages, m.renderGroupHeader(item))
+		}
+		m.messages = append(m.messages, m.renderMessageBody(item))
+		prevSender = item.sender
+		prevTS = item.timestamp
+	}
+}
+
+func (m *Model) renderGroupHeader(item messageItem) string {
+	name := item.sender
+	var nameStyled string
+	if item.direction == "outbound" {
+		nameStyled = style.Bold.Render("you")
+	} else {
+		nameStyled = style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(name)
+	}
+	ts := ""
+	if !item.timestamp.IsZero() {
+		ts = item.timestamp.Format(time.Kitchen)
+	}
+	suffix := style.Muted.Render(" " + style.GroupSep + " " + ts)
+	return nameStyled + suffix
+}
+
+func (m *Model) renderMessageBody(item messageItem) string {
+	bodyStyle := lipgloss.NewStyle()
+	if item.isAttachment {
+		bodyStyle = style.Italic
+	}
+	body := "  " + bodyStyle.Render(item.body)
+
+	if item.direction != "outbound" {
+		return body
+	}
+	glyph, glyphStyle := deliveryGlyphFor(item.status)
+	if glyph == "" {
+		return body
+	}
+	tick := " " + glyphStyle.Render(glyph)
+	width := m.viewport.Width
+	if width <= 0 {
+		return body + tick
+	}
+	pad := width - lipgloss.Width(body) - lipgloss.Width(tick)
+	if pad < 1 {
+		pad = 1
+	}
+	return body + strings.Repeat(" ", pad) + tick
+}
+
+func batchMessageID(batch *messaging.OutgoingBatch) string {
+	if batch == nil {
+		return ""
+	}
+	return batch.MessageID
+}
+
+// updateMessageStatus flips the delivery status on a specific outgoing message
+// and re-renders. Used by sendResultMsg (pending -> sent / failed) and by
+// delivery-ack events (sent -> delivered).
+func (m *Model) updateMessageStatus(messageID string, status deliveryStatus) bool {
+	if messageID == "" {
+		return false
+	}
+	for i := range m.messageItems {
+		if m.messageItems[i].direction != "outbound" || m.messageItems[i].messageID != messageID {
+			continue
+		}
+		if m.messageItems[i].status == status {
+			return true
+		}
+		m.messageItems[i].status = status
+		m.renderMessages()
+		return true
+	}
+	return false
+}
+
+func deliveryGlyphFor(s deliveryStatus) (string, lipgloss.Style) {
+	switch s {
+	case statusPending:
+		return style.GlyphDeliveryPending, style.DeliveryPending
+	case statusSent:
+		return style.GlyphDeliverySent, style.DeliverySent
+	case statusDelivered:
+		return style.GlyphDeliveryDelivered, style.DeliveryDelivered
+	case statusFailed:
+		return style.GlyphDeliveryFailed, style.DeliveryFailed
+	}
+	return "", lipgloss.NewStyle()
+}
+
+// attachmentBodyPattern returns true for messages that start with one of the
+// attachment prefixes the TUI emits ("photo sent:", "voice note sent:",
+// "file sent:"). Used to italicize attachment lines.
+func attachmentBodyPattern(body string) bool {
+	for _, prefix := range []string{"photo sent:", "voice note sent:", "file sent:"} {
+		if strings.HasPrefix(body, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) syncRecipientDetails() {
@@ -1113,7 +1295,15 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 		m.pushToast(err.Error(), ToastBad)
 		return m, nil
 	}
-	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+	m.appendMessageItem(messageItem{
+		direction:    "outbound",
+		sender:       m.mailbox,
+		body:         displayBody,
+		timestamp:    time.Now().UTC(),
+		messageID:    batchMessageID(batch),
+		status:       statusPending,
+		isAttachment: true,
+	})
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewport()
@@ -1201,7 +1391,15 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 		m.pushToast(err.Error(), ToastBad)
 		return nil
 	}
-	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+	m.appendMessageItem(messageItem{
+		direction:    "outbound",
+		sender:       m.mailbox,
+		body:         displayBody,
+		timestamp:    time.Now().UTC(),
+		messageID:    batchMessageID(batch),
+		status:       statusPending,
+		isAttachment: true,
+	})
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewport()
