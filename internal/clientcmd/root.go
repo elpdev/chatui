@@ -66,6 +66,7 @@ func Execute(args []string) error {
 		Mailbox:          cfg.Mailbox,
 		RecipientMailbox: cfg.RecipientMailbox,
 		RelayURL:         cfg.RelayURL,
+		RelayToken:       cfg.RelayToken,
 	})
 
 	program := tea.NewProgram(ui.New(chatModel), tea.WithAltScreen())

@@ -278,6 +278,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	model.SetSize(100, 20)
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(code), Paste: true})
 	// First ctrl+s parses the invite locally and shows a preview; no command.
 	_, previewCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -355,6 +356,7 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 	model.SetSize(100, 20)
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
 	// First ctrl+s parses; second ctrl+s commits.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -391,6 +393,7 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 	badInvite := "not a valid invite"
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(badInvite), Paste: true})
 	// With the preview step, a bad paste surfaces the decode error synchronously
 	// from the first ctrl+s — no async command, no preview state.

@@ -252,7 +252,7 @@ func runLookupContact(args []string) error {
 		return err
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
-	_, _, err = clientStore.LoadOrCreateIdentity(mailbox)
+	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
 	}
@@ -260,25 +260,8 @@ func runLookupContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	entry, err := client.LookupDirectoryEntry(*contactMailbox)
+	contact, err := service.ImportDirectoryContact(client, *contactMailbox)
 	if err != nil {
-		return err
-	}
-	if err := relayapi.VerifySignedDirectoryEntry(*entry); err != nil {
-		return err
-	}
-	contact, err := identity.ContactFromInvite(entry.Entry.Bundle)
-	if err != nil {
-		return err
-	}
-	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
-		contact.Verified = existing.Verified
-		contact.TrustSource = existing.TrustSource
-	}
-	contact.Verified = true
-	contact.TrustSource = identity.StrongerTrust(contact.TrustSource, identity.TrustSourceRelayDirectory)
-	contact.NormalizeTrust()
-	if err := clientStore.SaveContact(contact); err != nil {
 		return err
 	}
 	fmt.Printf("added relay directory contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
