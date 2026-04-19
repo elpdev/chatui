@@ -15,16 +15,28 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/transport"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type Deps struct {
-	Client           transport.Client
-	Messaging        *messaging.Service
-	Mailbox          string
-	RecipientMailbox string
-	RelayURL         string
+	Client             transport.Client
+	Messaging          *messaging.Service
+	Mailbox            string
+	RecipientMailbox   string
+	RelayURL           string
+	RelayToken         string
+	RelayClientFactory func(url, token string) (RelayClient, error)
+}
+
+// RelayClient is the minimum relay surface the add-contact modal needs for
+// directory lookups and invite-code rendezvous. Kept as an interface so tests
+// can swap in an in-memory fake.
+type RelayClient interface {
+	LookupDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	PutRendezvousPayload(id string, p relayapi.RendezvousPayload) error
+	GetRendezvousPayloads(id string) ([]relayapi.RendezvousPayload, error)
 }
 
 type contactItem struct {
@@ -59,39 +71,42 @@ const (
 )
 
 type Model struct {
-	client           transport.Client
-	messaging        *messaging.Service
-	mailbox          string
-	recipientMailbox string
-	relayURL         string
-	input            textinput.Model
-	viewport         viewport.Model
-	contacts         []contactItem
-	selectedIndex    int
-	messageItems     []messageItem
-	messages         []string
-	status           string
-	connecting       bool
-	disconnected     bool
-	connected        bool
-	authFailed       bool
-	reconnectAttempt int
-	reconnectDelay   time.Duration
-	peerFingerprint  string
-	peerVerified     bool
-	peerTrustSource  string
-	typing           typingState
-	filePicker       filePickerState
-	addContact       addContactState
-	helpOpen         bool
-	peerDetailOpen   bool
-	focus            focusState
-	pendingIncoming  int
-	unread           map[string]int
-	toast            *toastState
-	width            int
-	height           int
-	sidebarWidth     int
+	client             transport.Client
+	messaging          *messaging.Service
+	mailbox            string
+	recipientMailbox   string
+	relayURL           string
+	relayToken         string
+	relayClient        RelayClient
+	relayClientFactory func(url, token string) (RelayClient, error)
+	input              textinput.Model
+	viewport           viewport.Model
+	contacts           []contactItem
+	selectedIndex      int
+	messageItems       []messageItem
+	messages           []string
+	status             string
+	connecting         bool
+	disconnected       bool
+	connected          bool
+	authFailed         bool
+	reconnectAttempt   int
+	reconnectDelay     time.Duration
+	peerFingerprint    string
+	peerVerified       bool
+	peerTrustSource    string
+	typing             typingState
+	filePicker         filePickerState
+	addContact         addContactState
+	helpOpen           bool
+	peerDetailOpen     bool
+	focus              focusState
+	pendingIncoming    int
+	unread             map[string]int
+	toast              *toastState
+	width              int
+	height             int
+	sidebarWidth       int
 }
 
 // focusState tracks which pane owns keyboard input. In wide mode both panes
@@ -148,6 +163,19 @@ type addContactResultMsg struct {
 	contact *identity.Contact
 	err     error
 }
+type lookupContactResultMsg struct {
+	contact *identity.Contact
+	err     error
+}
+type inviteExchangeResultMsg struct {
+	contact   *identity.Contact
+	err       error
+	cancelled bool
+}
+type inviteStartedMsg struct {
+	code string
+	err  error
+}
 type sendResultMsg struct {
 	recipient string
 	messageID string
@@ -170,25 +198,53 @@ func New(deps Deps) *Model {
 	vp := viewport.New(0, 0)
 	vp.SetContent("")
 
+	factory := deps.RelayClientFactory
+	if factory == nil {
+		factory = defaultRelayClientFactory
+	}
 	m := &Model{
-		client:           deps.Client,
-		messaging:        deps.Messaging,
-		mailbox:          deps.Mailbox,
-		recipientMailbox: deps.RecipientMailbox,
-		relayURL:         deps.RelayURL,
-		input:            input,
-		viewport:         vp,
-		typing:           typingState{spinner: newTypingSpinner()},
-		status:           fmt.Sprintf("connecting as %s", deps.Mailbox),
-		connecting:       true,
-		selectedIndex:    -1,
-		filePicker:       filePickerState{dir: defaultFilePickerDir()},
-		unread:           map[string]int{},
+		client:             deps.Client,
+		messaging:          deps.Messaging,
+		mailbox:            deps.Mailbox,
+		recipientMailbox:   deps.RecipientMailbox,
+		relayURL:           deps.RelayURL,
+		relayToken:         deps.RelayToken,
+		relayClientFactory: factory,
+		input:              input,
+		viewport:           vp,
+		typing:             typingState{spinner: newTypingSpinner()},
+		status:             fmt.Sprintf("connecting as %s", deps.Mailbox),
+		connecting:         true,
+		selectedIndex:      -1,
+		filePicker:         filePickerState{dir: defaultFilePickerDir()},
+		unread:             map[string]int{},
 	}
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
 	return m
+}
+
+func defaultRelayClientFactory(url, token string) (RelayClient, error) {
+	return relayapi.NewClient(url, token)
+}
+
+// ensureRelayClient builds the relay client on demand. Returns an error if no
+// relay URL is configured — callers should gate relay-dependent flows before
+// reaching this point.
+func (m *Model) ensureRelayClient() (RelayClient, error) {
+	if m.relayClient != nil {
+		return m.relayClient, nil
+	}
+	if strings.TrimSpace(m.relayURL) == "" {
+		return nil, fmt.Errorf("no relay configured")
+	}
+	client, err := m.relayClientFactory(m.relayURL, m.relayToken)
+	if err != nil {
+		return nil, err
+	}
+	m.relayClient = client
+	return client, nil
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -388,16 +444,44 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		}
 		return m, nil
 	case addContactResultMsg:
-		m.addContact.importing = false
+		m.addContact.busy = false
+		m.addContact.cancel = nil
 		if msg.err != nil {
 			m.addContact.error = msg.err.Error()
 			return m, nil
 		}
-		m.upsertContact(msg.contact)
-		m.selectContact(msg.contact.AccountID)
-		m.activateSelectedContact()
-		m.closeAddContactModal(true)
-		m.pushToast(fmt.Sprintf("added verified contact %s", msg.contact.AccountID), ToastInfo)
+		m.finishAddContact(msg.contact, fmt.Sprintf("added verified contact %s", msg.contact.AccountID))
+		return m, nil
+	case lookupContactResultMsg:
+		m.addContact.busy = false
+		m.addContact.cancel = nil
+		if msg.err != nil {
+			m.addContact.error = msg.err.Error()
+			return m, nil
+		}
+		m.finishAddContact(msg.contact, fmt.Sprintf("added relay-directory contact %s", msg.contact.AccountID))
+		return m, nil
+	case inviteExchangeResultMsg:
+		m.addContact.busy = false
+		m.addContact.cancel = nil
+		if msg.cancelled {
+			m.addContact.error = "cancelled"
+			return m, nil
+		}
+		if msg.err != nil {
+			m.addContact.error = msg.err.Error()
+			return m, nil
+		}
+		m.finishAddContact(msg.contact, fmt.Sprintf("added invite-code contact %s", msg.contact.AccountID))
+		return m, nil
+	case inviteStartedMsg:
+		if msg.err != nil {
+			m.addContact.busy = false
+			m.addContact.cancel = nil
+			m.addContact.error = msg.err.Error()
+			return m, nil
+		}
+		m.addContact.code = msg.code
 		return m, nil
 	}
 
