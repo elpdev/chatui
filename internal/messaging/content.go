@@ -16,14 +16,22 @@ const (
 	contentKindAttachmentChunk = "attachment-chunk"
 	contentKindDeliveryAck     = "delivery-ack"
 	contentKindTyping          = "typing"
-	typingStateActive          = "active"
-	typingStateIdle            = "idle"
-	attachmentTypePhoto        = "photo"
-	attachmentTypeVoice        = "voice"
-	attachmentTypeFile         = "file"
+	TypingStateActive          = "active"
+	TypingStateIdle            = "idle"
+	AttachmentTypePhoto        = "photo"
+	AttachmentTypeVoice        = "voice"
+	AttachmentTypeFile         = "file"
 	attachmentChunkSizeBytes   = 8 * 1024
 	maxAttachmentSizeBytes     = 50 * 1024 * 1024
 	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
+)
+
+const (
+	typingStateActive   = TypingStateActive
+	typingStateIdle     = TypingStateIdle
+	attachmentTypePhoto = AttachmentTypePhoto
+	attachmentTypeVoice = AttachmentTypeVoice
+	attachmentTypeFile  = AttachmentTypeFile
 )
 
 type contentPayload struct {
@@ -74,7 +82,7 @@ func decodeContentPayload(body string) (*contentPayload, bool, error) {
 
 func buildAttachmentChunkPayloads(attachmentType, filename, mimeType string, bytes []byte) ([]string, string, error) {
 	if len(bytes) > maxAttachmentSizeBytes {
-		return nil, "", fmt.Errorf("%s exceeds attachment size limit of %d bytes", attachmentLabel(attachmentType), maxAttachmentSizeBytes)
+		return nil, "", fmt.Errorf("%s exceeds attachment size limit of %d bytes", AttachmentLabel(attachmentType), maxAttachmentSizeBytes)
 	}
 	attachmentID := uuid.NewString()
 	chunkCount := (len(bytes) + attachmentChunkSizeBytes - 1) / attachmentChunkSizeBytes
@@ -82,7 +90,7 @@ func buildAttachmentChunkPayloads(attachmentType, filename, mimeType string, byt
 		chunkCount = 1
 	}
 	if chunkCount > maxAttachmentChunkCount {
-		return nil, "", fmt.Errorf("%s exceeds attachment chunk limit", attachmentLabel(attachmentType))
+		return nil, "", fmt.Errorf("%s exceeds attachment chunk limit", AttachmentLabel(attachmentType))
 	}
 	payloads := make([]string, 0, chunkCount)
 	for chunkIndex := 0; chunkIndex < chunkCount; chunkIndex++ {
@@ -119,4 +127,17 @@ func sanitizeAttachmentName(name string) string {
 		return "attachment.bin"
 	}
 	return clean
+}
+
+func AttachmentLabel(attachmentType string) string {
+	switch attachmentType {
+	case AttachmentTypePhoto:
+		return "photo"
+	case AttachmentTypeVoice:
+		return "voice note"
+	case AttachmentTypeFile:
+		return "file"
+	default:
+		return "attachment"
+	}
 }

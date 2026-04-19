@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/store"
 	"rsc.io/qr"
@@ -107,11 +108,11 @@ func TestInviteCodeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new identity: %v", err)
 	}
-	code, err := encodeInviteCode(id.InviteBundle())
+	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
-	bundle, err := decodeInviteCode(code)
+	bundle, err := invite.DecodeCode(code)
 	if err != nil {
 		t.Fatalf("decode invite code: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestInviteCodeRoundTrip(t *testing.T) {
 
 func TestExtractInviteCodeFromVerboseOutput(t *testing.T) {
 	text := "account: leo\nfingerprint: abcdef0123456789\ninvite-code: raw-invite-code\n"
-	if got := extractInviteCode(text); got != "raw-invite-code" {
+	if got := invite.ExtractCode(text); got != "raw-invite-code" {
 		t.Fatalf("expected invite code extraction, got %q", got)
 	}
 }
@@ -135,11 +136,11 @@ func TestDecodeInviteTextAcceptsVerboseInviteOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new identity: %v", err)
 	}
-	code, err := encodeInviteCode(id.InviteBundle())
+	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
-	bundle, err := decodeInviteText("account: alice\nfingerprint: " + id.Fingerprint() + "\ninvite-code: " + code + "\n")
+	bundle, err := invite.DecodeText("account: alice\nfingerprint: " + id.Fingerprint() + "\ninvite-code: " + code + "\n")
 	if err != nil {
 		t.Fatalf("decode verbose invite text: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestRunImportContactWithStdin(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
-	code, err := encodeInviteCode(aliceID.InviteBundle())
+	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestRunImportContactWithPaste(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
-	code, err := encodeInviteCode(aliceID.InviteBundle())
+	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestRunImportContactLeavesContactUnverified(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
-	code, err := encodeInviteCode(aliceID.InviteBundle())
+	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestRunAddContactOutputShowsVerification(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
-	code, err := encodeInviteCode(aliceID.InviteBundle())
+	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
@@ -283,7 +284,7 @@ func TestRunInviteCodeRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create alice identity: %v", err)
 	}
-	code, err := encodeInviteCode(id.InviteBundle())
+	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestReadInviteBundleFromQRImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new identity: %v", err)
 	}
-	code, err := encodeInviteCode(id.InviteBundle())
+	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
 	}

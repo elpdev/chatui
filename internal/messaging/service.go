@@ -234,7 +234,7 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 	}
 	bytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", attachmentLabel(attachmentType), err)
+		return nil, "", fmt.Errorf("read %s: %w", AttachmentLabel(attachmentType), err)
 	}
 	filename := filepath.Base(path)
 	mimeType := detectAttachmentMIMEType(filename, bytes, attachmentType)
@@ -258,7 +258,7 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 		}
 		envelopes = append(envelopes, chunkEnvelopes...)
 	}
-	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", attachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
+	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
 }
 
 func missingContactError(recipientAccountID string) error {
@@ -403,7 +403,7 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 		return "", false, err
 	}
 	delete(s.incomingAttachments, key)
-	return fmt.Sprintf("%s received: %s saved to %s", attachmentLabel(pending.attachmentType), pending.filename, path), true, nil
+	return fmt.Sprintf("%s received: %s saved to %s", AttachmentLabel(pending.attachmentType), pending.filename, path), true, nil
 }
 
 func (s *Service) cleanupIncomingAttachments(now time.Time) {
@@ -456,19 +456,6 @@ func detectAttachmentMIMEType(filename string, bytes []byte, attachmentType stri
 		}
 	}
 	return mimeType
-}
-
-func attachmentLabel(attachmentType string) string {
-	switch attachmentType {
-	case attachmentTypePhoto:
-		return "photo"
-	case attachmentTypeVoice:
-		return "voice note"
-	case attachmentTypeFile:
-		return "file"
-	default:
-		return "attachment"
-	}
 }
 
 func (s *Service) contactUpdateEnvelopes(contact *identity.Contact) ([]protocol.Envelope, error) {

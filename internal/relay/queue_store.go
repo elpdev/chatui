@@ -26,6 +26,7 @@ var ErrDirectoryConflict = errors.New("mailbox directory entry is already claime
 var ErrNotFound = errors.New("not found")
 
 type QueueStore interface {
+	SetLimits(QueueLimits)
 	Enqueue(protocol.Envelope) error
 	Drain(mailbox string) ([]protocol.Envelope, error)
 	AuthorizeMailbox(mailbox string, signingPublic []byte) error
@@ -38,12 +39,12 @@ type QueueStore interface {
 }
 
 type MemoryQueueStore struct {
-	mu        sync.Mutex
-	mailboxes map[string][]protocol.Envelope
-	claims    map[string][]byte
-	directory map[string]relayapi.SignedDirectoryEntry
+	mu         sync.Mutex
+	mailboxes  map[string][]protocol.Envelope
+	claims     map[string][]byte
+	directory  map[string]relayapi.SignedDirectoryEntry
 	rendezvous map[string][]relayapi.RendezvousPayload
-	limits    QueueLimits
+	limits     QueueLimits
 }
 
 func NewMemoryQueueStore() *MemoryQueueStore {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
@@ -67,11 +68,11 @@ func runImportContactWithName(name string, args []string) error {
 		return err
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
-	_, _, err = clientStore.LoadOrCreateIdentity(mailbox)
+	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
 	}
-	bundle, err := readInviteBundle(inviteInputOptions{
+	inviteText, err := readInviteText(inviteInputOptions{
 		InvitePath:    *invitePath,
 		InviteCode:    *inviteCode,
 		ReadStdin:     *readStdin,
@@ -82,20 +83,8 @@ func runImportContactWithName(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	contact, err := identity.ContactFromInvite(*bundle)
+	contact, err := service.ImportContactInviteText(inviteText, name == "contact add")
 	if err != nil {
-		return err
-	}
-	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
-		contact.Verified = existing.Verified
-		contact.TrustSource = existing.TrustSource
-	}
-	if name == "contact add" {
-		contact.Verified = true
-		contact.TrustSource = identity.StrongerTrust(contact.TrustSource, identity.TrustSourceManualVerified)
-	}
-	contact.NormalizeTrust()
-	if err := clientStore.SaveContact(contact); err != nil {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
