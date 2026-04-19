@@ -61,9 +61,11 @@ const (
 )
 
 type filePickerEntry struct {
-	Name  string
-	Path  string
-	IsDir bool
+	Name     string
+	Path     string
+	IsDir    bool
+	IsParent bool  // true for the synthetic ".." entry
+	Size     int64 // only meaningful for files (IsDir == false)
 }
 
 type Model struct {
@@ -101,7 +103,9 @@ type Model struct {
 	addContactError     string
 	addContactImporting bool
 	addContactOpen      bool
+	addContactPreview   *identity.Contact
 	helpOpen            bool
+	peerDetailOpen      bool
 	focus               focusState
 	pendingIncoming     int
 	unread              map[string]int
@@ -255,8 +259,25 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.jumpToLatest()
 			return m, nil
 		}
+		if m.peerDetailOpen {
+			if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlP {
+				m.peerDetailOpen = false
+				return m, nil
+			}
+			// Absorb other keys so the chat input doesn't process them while
+			// the drawer is visible.
+			return m, nil
+		}
 		if msg.Type == tea.KeyCtrlN {
 			m.openAddContactModal()
+			return m, nil
+		}
+		// ctrl+p: "peer" — toggle the peer detail drawer. (ctrl+i is a
+		// terminal synonym for tab, so we use a different binding.)
+		if msg.Type == tea.KeyCtrlP {
+			if m.recipientMailbox != "" {
+				m.peerDetailOpen = true
+			}
 			return m, nil
 		}
 		switch msg.Type {
@@ -457,6 +478,9 @@ func (m *Model) View() string {
 	}
 	if m.addContactOpen {
 		return m.renderAddContactModal(view)
+	}
+	if m.peerDetailOpen {
+		return m.renderPeerDetailModal(view)
 	}
 	return view
 }
@@ -801,6 +825,7 @@ func (m *Model) closeAddContactModal(keepStatus bool) {
 	m.addContactImporting = false
 	m.addContactError = ""
 	m.addContactValue = ""
+	m.addContactPreview = nil
 	if !keepStatus {
 		m.pushToast("add contact cancelled", ToastInfo)
 	}
@@ -843,6 +868,30 @@ func (m *Model) jumpToLatest() {
 }
 
 func (m *Model) handleAddContactKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
+	// Preview step — the user already parsed a valid invite and is one
+	// keystroke away from committing. Keep this narrow: ctrl+s commits, esc
+	// steps back to the paste editor (preserving the text so they can retry).
+	if m.addContactPreview != nil {
+		switch msg.Type {
+		case tea.KeyEsc:
+			if m.addContactImporting {
+				return m, nil
+			}
+			m.addContactPreview = nil
+			m.addContactError = ""
+			return m, nil
+		case tea.KeyCtrlS:
+			if m.addContactImporting {
+				return m, nil
+			}
+			m.addContactError = ""
+			m.addContactImporting = true
+			return m, m.importContactCmd(strings.TrimSpace(m.addContactValue))
+		}
+		return m, nil
+	}
+
+	// Paste / edit step.
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.closeAddContactModal(false)
@@ -856,9 +905,14 @@ func (m *Model) handleAddContactKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
 			m.addContactError = "invite input is empty"
 			return m, nil
 		}
+		contact, err := m.messaging.PreviewContactInviteText(trimmed)
+		if err != nil {
+			m.addContactError = err.Error()
+			return m, nil
+		}
 		m.addContactError = ""
-		m.addContactImporting = true
-		return m, m.importContactCmd(trimmed)
+		m.addContactPreview = contact
+		return m, nil
 	case tea.KeyEnter, tea.KeyCtrlJ:
 		m.appendAddContactText("\n")
 		return m, nil
@@ -1245,15 +1299,7 @@ func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
 func (m *Model) renderConversation() string {
 	width := m.conversationWidth()
 	if m.recipientMailbox == "" {
-		empty := []string{
-			style.Bold.Render("No chat selected"),
-			style.Muted.Render("Pick a contact from the sidebar to load the conversation."),
-			style.Muted.Render("Press ctrl+n to import a verified contact without leaving the TUI."),
-			style.Muted.Render("Verified contacts are labeled directly in the roster."),
-			"",
-			m.input.View(),
-		}
-		return lipgloss.NewStyle().Width(width).Render(strings.Join(empty, "\n"))
+		return m.renderEmptyConversation(width)
 	}
 	if m.filePickerOpen {
 		return m.renderFilePicker(width)
@@ -1261,7 +1307,7 @@ func (m *Model) renderConversation() string {
 	peerHeading := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
 	header := []string{
 		peerHeading,
-		style.Muted.Render("ctrl+o attach file  |  ? help  |  tab switch pane"),
+		style.Muted.Render("ctrl+o attach  |  ctrl+p peer detail  |  ? help"),
 		m.viewport.View(),
 		m.renderJumpPill(width),
 		m.renderToast(),
@@ -1269,6 +1315,43 @@ func (m *Model) renderConversation() string {
 		m.input.View(),
 	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(header, "\n"))
+}
+
+// renderEmptyConversation draws the right-pane placeholder when no chat is
+// open. First-run (no contacts) shows a welcome card with a three-step quick
+// start; if the user already has contacts they just haven't picked one,
+// show a terser "pick a contact" hint.
+func (m *Model) renderEmptyConversation(width int) string {
+	if len(m.contacts) == 0 {
+		return m.renderWelcomeCard(width)
+	}
+	lines := []string{
+		style.Bold.Render("No chat selected"),
+		style.Muted.Render("Pick a contact from the sidebar, or press ctrl+n to import another."),
+		"",
+		m.input.View(),
+	}
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) renderWelcomeCard(width int) string {
+	cardWidth := min(max(40, width-4), max(30, width-2))
+	title := style.Bright.Bold(true).Render("Welcome to Pando")
+	rule := style.Muted.Render(strings.Repeat("─", max(1, lipgloss.Width(title))))
+	step := func(n, label, hint string) string {
+		head := style.StatusInfo.Bold(true).Render(n) + "  " + style.Bold.Render(label)
+		return head + "\n      " + style.Muted.Render(hint)
+	}
+	body := strings.Join([]string{
+		title,
+		rule,
+		"",
+		step("1.", "share your code", "pando identity invite-code --copy"),
+		step("2.", "import theirs", "ctrl+n  (or pando contact add --paste)"),
+		step("3.", "start typing", "pick them in the sidebar, then hit enter"),
+	}, "\n")
+	card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
+	return lipgloss.NewStyle().Width(width).Render(card + "\n\n" + m.input.View())
 }
 
 // conversationWidth is the effective width of the conversation pane. In narrow
@@ -1301,23 +1384,56 @@ func (m *Model) renderAddContactModal(base string) string {
 		return base
 	}
 	bodyWidth := max(24, modalWidth-6)
-	inputHeight := max(5, modalHeight-10)
+
 	title := style.Bright.Bold(true).Render("Add Contact")
-	description := style.Dim.Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Imported contacts are marked verified immediately and opened right away.")
-	input := m.renderAddContactEditor(bodyWidth, inputHeight)
-	footerText := "enter newline  ctrl+s import  ctrl+u clear  esc cancel"
-	if m.addContactImporting {
-		footerText = "importing contact..."
+	parts := []string{title}
+
+	if m.addContactPreview != nil {
+		parts = append(parts, m.renderAddContactPreview(bodyWidth))
+		footer := "ctrl+s import and verify   esc back"
+		if m.addContactImporting {
+			footer = "importing contact..."
+		}
+		if m.addContactError != "" {
+			parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
+		}
+		parts = append(parts, style.Subtle.Render(footer))
+	} else {
+		inputHeight := max(5, modalHeight-10)
+		description := style.Dim.Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Pressing ctrl+s parses it and shows a preview before anything is saved.")
+		input := m.renderAddContactEditor(bodyWidth, inputHeight)
+		parts = append(parts, description, input)
+		if m.addContactError != "" {
+			parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
+		}
+		footer := "enter newline  ctrl+s preview  ctrl+u clear  esc cancel"
+		parts = append(parts, style.Subtle.Render(footer))
 	}
-	footer := style.Subtle.Render(footerText)
-	parts := []string{title, description, input}
-	if m.addContactError != "" {
-		parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
-	}
-	parts = append(parts, footer)
+
 	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(strings.Join(parts, "\n\n"))
 	background := style.Faint.Render(base)
 	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+}
+
+// renderAddContactPreview draws the read-only "parsed invite" card shown after
+// a successful parse, before the user commits the import.
+func (m *Model) renderAddContactPreview(width int) string {
+	c := m.addContactPreview
+	if c == nil {
+		return ""
+	}
+	fp := c.Fingerprint()
+	deviceCount := len(c.ActiveDevices())
+	row := func(label, value string) string {
+		return style.Muted.Render(label) + "  " + value
+	}
+	body := strings.Join([]string{
+		style.Bold.Render("parsed invite"),
+		row("account    ", style.PeerAccentStyle(fp).Bold(true).Render(c.AccountID)),
+		row("fingerprint", style.Bright.Render(style.FormatFingerprint(fp))),
+		row("devices    ", style.Bright.Render(fmt.Sprintf("%d active", deviceCount))),
+	}, "\n")
+	return lipgloss.NewStyle().Width(width).Render(body)
 }
 
 func (m *Model) renderAddContactEditor(width, height int) string {
@@ -1359,6 +1475,7 @@ var helpSectionNavigation = []helpShortcut{
 var helpSectionMessaging = []helpShortcut{
 	{"ctrl+n", "add contact"},
 	{"ctrl+o", "attach file"},
+	{"ctrl+p", "peer detail"},
 	{"/send-photo <path>", "attach photo via path"},
 	{"/send-voice <path>", "attach voice via path"},
 	{"/send-file <path>", "attach file via path"},
@@ -1388,6 +1505,56 @@ func (m *Model) renderHelpModal(base string) string {
 	)
 	footer := style.Subtle.Render("? or esc to close")
 	body := strings.Join([]string{title, columns, footer}, "\n\n")
+	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
+	background := style.Faint.Render(base)
+	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+}
+
+// renderPeerDetailModal shows the full fingerprint, verification state, and
+// device count for the currently open chat. Keeps the app header compact
+// while making the full identity one keystroke away.
+func (m *Model) renderPeerDetailModal(base string) string {
+	modalWidth := min(max(56, m.width*2/3), max(40, m.width-6))
+	if modalWidth <= 0 || m.height <= 0 {
+		return base
+	}
+	bodyWidth := max(24, modalWidth-6)
+
+	title := style.Bright.Bold(true).Render("Peer detail")
+
+	mailboxLine := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
+
+	verifyLine := style.UnverifiedWarn.Render("unverified")
+	if m.peerVerified {
+		verifyLine = style.VerifiedOk.Render("verified")
+	}
+
+	fullFp := m.peerFingerprint
+	shortFp := style.FormatFingerprintShort(fullFp)
+	fpLong := style.FormatFingerprint(fullFp)
+
+	deviceCount := 0
+	if contact, err := m.messaging.Contact(m.recipientMailbox); err == nil {
+		deviceCount = len(contact.ActiveDevices())
+	}
+
+	row := func(label, value string) string {
+		padLabel := style.Muted.Render(label)
+		return padLabel + "  " + value
+	}
+
+	parts := []string{
+		title,
+		mailboxLine + "  " + verifyLine,
+		"",
+		row("fingerprint", style.Bright.Render(fpLong)),
+		row("short     ", style.Muted.Render(shortFp)),
+		row("devices   ", style.Bright.Render(fmt.Sprintf("%d active", deviceCount))),
+		row("relay     ", style.Muted.Render(m.relayURL)),
+		"",
+		style.Subtle.Render("ctrl+p or esc to close"),
+	}
+	body := lipgloss.NewStyle().Width(bodyWidth).Render(strings.Join(parts, "\n"))
 	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
 	background := style.Faint.Render(base)
 	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
@@ -1717,13 +1884,20 @@ func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	items := make([]filePickerEntry, 0, len(entries))
+	items := make([]filePickerEntry, 0, len(entries)+1)
 	for _, entry := range entries {
 		name := entry.Name()
+		var size int64
+		if !entry.IsDir() {
+			if info, err := entry.Info(); err == nil {
+				size = info.Size()
+			}
+		}
 		items = append(items, filePickerEntry{
 			Name:  name,
 			Path:  filepath.Join(cleanedDir, name),
 			IsDir: entry.IsDir(),
+			Size:  size,
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1732,7 +1906,37 @@ func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
 		}
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
+	// Prepend a synthetic ".." entry unless we're already at the filesystem
+	// root so backspace-less users can navigate up with ⏎.
+	if parent := filepath.Dir(cleanedDir); parent != cleanedDir {
+		items = append([]filePickerEntry{{
+			Name:     "..",
+			Path:     parent,
+			IsDir:    true,
+			IsParent: true,
+		}}, items...)
+	}
 	return items, cleanedDir, nil
+}
+
+// formatFileSize renders a byte count as a short human-readable string:
+// "473 B", "12.3 KB", "4.1 MB", "2.7 GB".
+func formatFileSize(bytes int64) string {
+	const (
+		KB = 1024
+		MB = 1024 * KB
+		GB = 1024 * MB
+	)
+	switch {
+	case bytes < KB:
+		return fmt.Sprintf("%d B", bytes)
+	case bytes < MB:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/KB)
+	case bytes < GB:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/MB)
+	default:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/GB)
+	}
 }
 
 func (m *Model) renderFilePicker(width int) string {
@@ -1740,37 +1944,54 @@ func (m *Model) renderFilePicker(width int) string {
 	dirLine := style.Muted.Render(m.filePickerDir)
 	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
 	lines := []string{title, dirLine, hint, ""}
+	modalWidth := min(max(48, width-6), width)
+	rowWidth := max(1, modalWidth-6)
 	visibleEntries, hiddenAbove, hiddenBelow := m.filePickerVisibleEntries(max(1, m.height-12))
 	if len(m.filePickerEntries) == 0 {
-		lines = append(lines, style.Muted.Render("This directory is empty."))
+		lines = append(lines, style.Muted.Render("(empty) — backspace to go up"))
 	} else {
 		if hiddenAbove {
 			lines = append(lines, style.Muted.Render("..."))
 		}
 		for _, visible := range visibleEntries {
-			idx := visible.index
-			entry := visible.entry
-			label := entry.Name
-			if entry.IsDir {
-				label += string(filepath.Separator)
-			}
-			rowStyle := lipgloss.NewStyle()
-			if entry.IsDir {
-				rowStyle = rowStyle.Inherit(style.StatusOk)
-			}
-			if idx == m.filePickerSelected {
-				rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
-			}
-			lines = append(lines, rowStyle.Render(label))
+			lines = append(lines, m.renderFilePickerRow(visible.entry, visible.index == m.filePickerSelected, rowWidth))
 		}
 		if hiddenBelow {
 			lines = append(lines, style.Muted.Render("..."))
 		}
 	}
-	modalWidth := min(max(48, width-6), width)
 	modalHeight := max(8, m.height-4)
 	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+}
+
+// renderFilePickerRow lays out "name   size" so file sizes are right-aligned
+// within the modal. Directories (including the synthetic "..") render in the
+// StatusOk color with no size; files render at default color with a muted
+// size suffix.
+func (m *Model) renderFilePickerRow(entry filePickerEntry, selected bool, width int) string {
+	label := entry.Name
+	if entry.IsDir {
+		label += string(filepath.Separator)
+	}
+	sizeStr := ""
+	if !entry.IsDir {
+		sizeStr = formatFileSize(entry.Size)
+	}
+	pad := width - lipgloss.Width(label) - lipgloss.Width(sizeStr)
+	if pad < 1 {
+		pad = 1
+	}
+	line := label + strings.Repeat(" ", pad) + style.Muted.Render(sizeStr)
+
+	rowStyle := lipgloss.NewStyle().Width(width)
+	if entry.IsDir {
+		rowStyle = rowStyle.Inherit(style.StatusOk)
+	}
+	if selected {
+		rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
+	}
+	return rowStyle.Render(line)
 }
 
 type filePickerVisibleEntry struct {

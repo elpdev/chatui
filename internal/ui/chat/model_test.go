@@ -279,6 +279,15 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(code), Paste: true})
+	// First ctrl+s parses the invite locally and shows a preview; no command.
+	_, previewCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if previewCmd != nil {
+		t.Fatal("expected first ctrl+s to only show preview, no async command")
+	}
+	if model.addContactPreview == nil {
+		t.Fatal("expected preview state to be populated after ctrl+s")
+	}
+	// Second ctrl+s commits the import.
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	if cmd == nil {
 		t.Fatal("expected import command")
@@ -347,6 +356,11 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	// First ctrl+s parses; second ctrl+s commits.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if model.addContactPreview == nil {
+		t.Fatal("expected verbose paste to parse into a preview")
+	}
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	if cmd == nil {
 		t.Fatal("expected import command")
@@ -378,11 +392,15 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(badInvite), Paste: true})
+	// With the preview step, a bad paste surfaces the decode error synchronously
+	// from the first ctrl+s — no async command, no preview state.
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	if cmd == nil {
-		t.Fatal("expected import command")
+	if cmd != nil {
+		t.Fatal("expected no command when invite fails to parse")
 	}
-	_, _ = model.Update(cmd())
+	if model.addContactPreview != nil {
+		t.Fatal("expected no preview when invite fails to parse")
+	}
 
 	if !model.addContactOpen {
 		t.Fatal("expected modal to stay open on error")
@@ -804,6 +822,9 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 		t.Fatalf("expected modal title in view: %q", model.View())
 	}
 
+	// The first entry is the synthetic ".." — step down to reach draft.txt.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+
 	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected send command from picker selection")
@@ -863,8 +884,14 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	if !model.filePickerOpen {
 		t.Fatal("expected file picker to open")
 	}
+	// First entry is the synthetic ".." parent pointer.
+	if first := model.selectedFilePickerEntry(); first == nil || !first.IsParent {
+		t.Fatalf("expected first picker entry to be the parent pointer, got %+v", first)
+	}
+	// Move past ".." to reach the photos directory.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if model.selectedFilePickerEntry() == nil || !model.selectedFilePickerEntry().IsDir {
-		t.Fatalf("expected first picker entry to be the child directory, got %+v", model.selectedFilePickerEntry())
+		t.Fatalf("expected second picker entry to be the child directory, got %+v", model.selectedFilePickerEntry())
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1329,6 +1356,113 @@ func TestPendingIncomingRendersJumpPillAndClearsOnEnd(t *testing.T) {
 	}
 	if !model.viewport.AtBottom() {
 		t.Fatal("expected end-key to scroll viewport to bottom")
+	}
+}
+
+func TestWelcomeCardShownWhenNoContacts(t *testing.T) {
+	model := newHelpTestModel(t)
+	view := model.View()
+	if !strings.Contains(view, "Welcome to Pando") {
+		t.Fatalf("expected welcome card on empty contact list: %q", view)
+	}
+	if !strings.Contains(view, "share your code") {
+		t.Fatalf("expected welcome card step 1 in view: %q", view)
+	}
+}
+
+func TestPeerDetailDrawerToggle(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("contact from invite: %v", err)
+	}
+	bobContact.Verified = true
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        aliceService,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 24)
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	if !model.peerDetailOpen {
+		t.Fatal("expected ctrl+p to open peer detail")
+	}
+	view := model.View()
+	if !strings.Contains(view, "Peer detail") {
+		t.Fatalf("expected peer detail title in view: %q", view)
+	}
+	// Full formatted fingerprint should appear.
+	if !strings.Contains(view, style.FormatFingerprint(bobContact.Fingerprint())) {
+		t.Fatalf("expected formatted fingerprint in drawer: %q", view)
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.peerDetailOpen {
+		t.Fatal("expected esc to close the drawer")
+	}
+}
+
+func TestFilePickerRendersSizesAndParentEntry(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(file, []byte("hello, world\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.SetSize(100, 20)
+	model.filePickerDir = dir
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if !model.filePickerOpen {
+		t.Fatal("expected picker to open")
+	}
+
+	// First entry must be the parent pointer; note.txt must follow with its size.
+	entries := model.filePickerEntries
+	if len(entries) < 2 {
+		t.Fatalf("expected picker to include .. + note.txt, got %+v", entries)
+	}
+	if !entries[0].IsParent || entries[0].Name != ".." {
+		t.Fatalf("expected first entry to be the '..' parent pointer, got %+v", entries[0])
+	}
+	if entries[1].Name != "note.txt" || entries[1].Size == 0 {
+		t.Fatalf("expected note.txt with non-zero size, got %+v", entries[1])
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "..") || !strings.Contains(view, "note.txt") {
+		t.Fatalf("expected picker view to show .. and note.txt: %q", view)
+	}
+	if !strings.Contains(view, "B") && !strings.Contains(view, "KB") {
+		t.Fatalf("expected a file size label in view: %q", view)
 	}
 }
 

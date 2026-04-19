@@ -86,6 +86,21 @@ func (s *Service) ImportContactInviteText(text string, verified bool) (*identity
 	return s.ImportContactInviteBundle(*bundle, verified)
 }
 
+// PreviewContactInviteText parses an invite text into a Contact without
+// saving it. Used by the add-contact modal to show the user what they're
+// about to import before committing.
+func (s *Service) PreviewContactInviteText(text string) (*identity.Contact, error) {
+	bundle, err := invite.DecodeText(text)
+	if err != nil {
+		return nil, err
+	}
+	contact, err := identity.ContactFromInvite(*bundle)
+	if err != nil {
+		return nil, err
+	}
+	return contact, nil
+}
+
 func (s *Service) ImportContactInviteBundle(bundle identity.InviteBundle, verified bool) (*identity.Contact, error) {
 	contact, err := identity.ContactFromInvite(bundle)
 	if err != nil {
