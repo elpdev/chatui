@@ -658,6 +658,87 @@ func TestPrepareVoiceOutgoingAcceptsM4AExtension(t *testing.T) {
 	}
 }
 
+func TestFileChunkRoundTripStoresAttachment(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobDir := t.TempDir()
+	bobStore := store.NewClientStore(bobDir)
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	fileBytes := []byte("plain text file contents")
+	filePath := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(filePath, fileBytes, 0o600); err != nil {
+		t.Fatalf("write file fixture: %v", err)
+	}
+
+	batch, displayBody, err := aliceService.PrepareFileOutgoing("bob", filePath)
+	if err != nil {
+		t.Fatalf("prepare file outgoing: %v", err)
+	}
+	if batch == nil || len(batch.Envelopes) < 2 {
+		t.Fatalf("expected file batch with chunk envelopes, got %+v", batch)
+	}
+	if displayBody != "file sent: notes.txt" {
+		t.Fatalf("unexpected file display body: %q", displayBody)
+	}
+
+	var finalResult *IncomingResult
+	for i := range batch.Envelopes {
+		envelope := batch.Envelopes[i]
+		envelope.ID = fmt.Sprintf("file-env-%d", i)
+		result, err := bobService.HandleIncoming(envelope)
+		if err != nil {
+			t.Fatalf("handle incoming envelope %d: %v", i, err)
+		}
+		if result != nil && !result.Control && result.Body != "" {
+			finalResult = result
+		}
+	}
+	if finalResult == nil {
+		t.Fatal("expected final file result")
+	}
+	if !strings.Contains(finalResult.Body, "file received: notes.txt saved to ") {
+		t.Fatalf("unexpected final body: %q", finalResult.Body)
+	}
+	attachmentPaths, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*"))
+	if err != nil {
+		t.Fatalf("glob attachments: %v", err)
+	}
+	if len(attachmentPaths) != 1 {
+		t.Fatalf("expected one stored attachment, got %v", attachmentPaths)
+	}
+	storedBytes, err := os.ReadFile(attachmentPaths[0])
+	if err != nil {
+		t.Fatalf("read stored attachment: %v", err)
+	}
+	if string(storedBytes) != string(fileBytes) {
+		t.Fatal("stored attachment bytes did not match original file")
+	}
+	if len(finalResult.AckEnvelopes) != 0 {
+		t.Fatalf("expected no delivery ack for file chunks, got %d", len(finalResult.AckEnvelopes))
+	}
+}
+
 func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
 	defer server.Close()

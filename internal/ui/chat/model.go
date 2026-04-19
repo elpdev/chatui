@@ -3,10 +3,14 @@ package chat
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +19,7 @@ import (
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/transport"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type Deps struct {
@@ -29,6 +34,12 @@ type contactItem struct {
 	Mailbox     string
 	Fingerprint string
 	Verified    bool
+}
+
+type filePickerEntry struct {
+	Name  string
+	Path  string
+	IsDir bool
 }
 
 type Model struct {
@@ -52,10 +63,14 @@ type Model struct {
 	peerVerified        bool
 	peerTyping          bool
 	peerTypingExpiresAt time.Time
-	typingFrame         int
+	typingSpinner       spinner.Model
 	localTypingSent     bool
 	localTypingPeer     string
 	localTypingAt       time.Time
+	filePickerOpen      bool
+	filePickerDir       string
+	filePickerEntries   []filePickerEntry
+	filePickerSelected  int
 	addContactValue     string
 	addContactError     string
 	addContactImporting bool
@@ -86,6 +101,9 @@ const (
 	typingIdleTimeout       = 2 * time.Second
 	typingStateActive       = "active"
 	typingStateIdle         = "idle"
+	attachmentModePhoto     = "photo"
+	attachmentModeVoice     = "voice"
+	attachmentModeFile      = "file"
 	addContactLimit         = 16384
 )
 
@@ -98,6 +116,10 @@ func New(deps Deps) *Model {
 	vp := viewport.New(0, 0)
 	vp.SetContent("")
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = style.Muted
+
 	m := &Model{
 		client:           deps.Client,
 		messaging:        deps.Messaging,
@@ -106,9 +128,11 @@ func New(deps Deps) *Model {
 		relayURL:         deps.RelayURL,
 		input:            input,
 		viewport:         vp,
+		typingSpinner:    sp,
 		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
 		connecting:       true,
 		selectedIndex:    -1,
+		filePickerDir:    defaultFilePickerDir(),
 	}
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
@@ -131,6 +155,9 @@ func (m *Model) SetSize(width, height int) {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.filePickerOpen {
+			return m, m.updateFilePicker(msg)
+		}
 		if m.addContactOpen {
 			return m.handleAddContactKey(msg)
 		}
@@ -144,6 +171,24 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyDown:
 			m.moveSelection(1)
+			return m, nil
+		case tea.KeyCtrlO:
+			if m.authFailed {
+				m.status = "cannot attach: relay auth failed; restart with --relay-token"
+				return m, nil
+			}
+			if m.recipientMailbox == "" {
+				m.status = "select a contact from the sidebar first"
+				return m, nil
+			}
+			if !m.connected {
+				m.status = "relay is not connected; waiting to reconnect"
+				return m, nil
+			}
+			if err := m.openFilePicker(); err != nil {
+				m.status = fmt.Sprintf("open file picker failed: %v", err)
+				return m, nil
+			}
 			return m, nil
 		case tea.KeyEnter:
 			body := strings.TrimSpace(m.input.Value())
@@ -167,38 +212,13 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.HasPrefix(body, "/send-photo") {
-				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-photo")))
-				if path == "" {
-					m.status = "usage: /send-photo <path>"
-					return m, nil
-				}
-				batch, displayBody, err := m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
-				if err != nil {
-					m.status = err.Error()
-					return m, nil
-				}
-				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
-				m.input.SetValue("")
-				m.resetLocalTypingState()
-				m.syncViewport()
-				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+				return m.handleAttachmentCommand("/send-photo", body, m.messaging.PreparePhotoOutgoing)
 			}
 			if strings.HasPrefix(body, "/send-voice") {
-				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-voice")))
-				if path == "" {
-					m.status = "usage: /send-voice <path>"
-					return m, nil
-				}
-				batch, displayBody, err := m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
-				if err != nil {
-					m.status = err.Error()
-					return m, nil
-				}
-				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
-				m.input.SetValue("")
-				m.resetLocalTypingState()
-				m.syncViewport()
-				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+				return m.handleAttachmentCommand("/send-voice", body, m.messaging.PrepareVoiceOutgoing)
+			}
+			if strings.HasPrefix(body, "/send-file") {
+				return m.handleAttachmentCommand("/send-file", body, m.messaging.PrepareFileOutgoing)
 			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
@@ -214,15 +234,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	case clientEventMsg:
 		event := transport.Event(msg)
 		if event.Err != nil {
-			if transport.IsUnauthorized(event.Err) {
-				m.handleAuthFailure(event.Err)
-				return m, nil
-			}
-			m.status = fmt.Sprintf("disconnected: %v", event.Err)
-			m.disconnected = true
-			m.connected = false
-			m.resetLocalTypingState()
-			return m, m.reconnectCmd()
+			return m, m.handleConnectionError(event.Err)
 		}
 		if event.Message != nil {
 			m.handleProtocolMessage(*event.Message)
@@ -230,57 +242,31 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, m.waitForEvent()
 	case connectResultMsg:
 		if msg.err != nil {
-			if transport.IsUnauthorized(msg.err) {
-				m.handleAuthFailure(msg.err)
-				return m, nil
-			}
-			m.status = fmt.Sprintf("disconnected: %v", msg.err)
-			m.disconnected = true
-			m.connected = false
-			m.resetLocalTypingState()
-			return m, m.reconnectCmd()
+			return m, m.handleConnectionError(msg.err)
 		}
-		m.connecting = false
-		m.connected = true
-		m.authFailed = false
-		m.disconnected = false
-		m.reconnectAttempt = 0
-		m.syncInputPlaceholder()
-		m.status = fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox)
+		m.markConnected(fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox))
 		return m, m.waitForEvent()
 	case reconnectResultMsg:
 		if msg.err != nil {
-			if transport.IsUnauthorized(msg.err) {
-				m.handleAuthFailure(msg.err)
-				return m, nil
-			}
-			m.disconnected = true
-			m.connected = false
-			m.resetLocalTypingState()
-			return m, m.reconnectCmd()
+			return m, m.handleConnectionError(msg.err)
 		}
-		m.connecting = false
-		m.connected = true
-		m.authFailed = false
-		m.disconnected = false
-		m.reconnectAttempt = 0
-		m.syncInputPlaceholder()
-		m.status = fmt.Sprintf("reconnected to %s and resubscribed as %s", m.relayURL, m.mailbox)
+		m.markConnected(fmt.Sprintf("reconnected to %s and resubscribed as %s", m.relayURL, m.mailbox))
 		return m, m.waitForEvent()
 	case typingTickMsg:
 		now := time.Time(msg)
 		if m.peerTyping && !m.peerTypingExpiresAt.IsZero() && !now.Before(m.peerTypingExpiresAt) {
 			m.clearPeerTyping()
 		}
+		var spCmd tea.Cmd
 		if m.peerTyping {
-			m.typingFrame = (m.typingFrame + 1) % 3
+			m.typingSpinner, spCmd = m.typingSpinner.Update(spinner.TickMsg{Time: now})
 		}
 		var cmd tea.Cmd
 		if m.localTypingSent && !m.localTypingAt.IsZero() && now.Sub(m.localTypingAt) >= typingIdleTimeout {
 			cmd = m.sendTypingCmd(m.localTypingPeer, typingStateIdle)
 			m.resetLocalTypingState()
 		}
-		return m, tea.Batch(m.typingTickCmd(), cmd)
+		return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
 	case sendResultMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("send failed: %v", msg.err)
@@ -374,13 +360,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 	switch msg.Type {
 	case protocol.MessageTypeAck:
 		if m.connecting {
-			m.connecting = false
-			m.connected = true
-			m.authFailed = false
-			m.disconnected = false
-			m.reconnectAttempt = 0
-			m.syncInputPlaceholder()
-			m.status = fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox)
+			m.markConnected(fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox))
 		}
 	case protocol.MessageTypeIncoming:
 		if msg.Incoming == nil {
@@ -416,7 +396,9 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 					if result.TypingState == typingStateActive {
 						m.peerTyping = true
 						m.peerTypingExpiresAt = result.TypingExpiresAt
-						m.typingFrame = 0
+						m.typingSpinner = spinner.New()
+						m.typingSpinner.Spinner = spinner.Dot
+						m.typingSpinner.Style = style.Muted
 					} else {
 						m.clearPeerTyping()
 					}
@@ -771,30 +753,30 @@ func (m *Model) updateLayout() {
 }
 
 func (m *Model) renderSidebar() string {
-	border := lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).BorderForeground(lipgloss.Color("238"))
-	title := lipgloss.NewStyle().Bold(true).Render("Contacts")
+	border := style.SidebarBorder
+	title := style.Bold.Render("Contacts")
 	shortcut := "up/down browse  enter open  ctrl+n add"
 	if m.addContactOpen {
 		shortcut = "add contact open  ctrl+s import  esc cancel"
 	}
-	lines := []string{title, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(shortcut)}
+	lines := []string{title, style.Muted.Render(shortcut)}
 	if len(m.contacts) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("No contacts yet."))
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ctrl+n to add one here."))
+		lines = append(lines, style.Muted.Render("No contacts yet."))
+		lines = append(lines, style.Muted.Render("Press ctrl+n to add one here."))
 		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
 	}
 	for idx, contact := range m.contacts {
 		mailboxStyle := lipgloss.NewStyle()
 		if idx == m.selectedIndex {
-			mailboxStyle = mailboxStyle.Background(lipgloss.Color("238"))
+			mailboxStyle = style.Selected
 		}
 		if contact.Mailbox == m.recipientMailbox {
-			mailboxStyle = mailboxStyle.Bold(true).Foreground(lipgloss.Color("86"))
+			mailboxStyle = style.Accent.Bold(true)
 		}
-		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+		statusStyle := style.Warning
 		statusText := "unverified"
 		if contact.Verified {
-			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+			statusStyle = style.Accent
 			statusText = "verified"
 		}
 		line := fmt.Sprintf("%s  %s", mailboxStyle.Render(contact.Mailbox), statusStyle.Render(statusText))
@@ -807,18 +789,22 @@ func (m *Model) renderConversation() string {
 	width := max(1, m.width-m.sidebarWidth-1)
 	if m.recipientMailbox == "" {
 		empty := []string{
-			lipgloss.NewStyle().Bold(true).Render("No chat selected"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Pick a contact from the sidebar to load the conversation."),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ctrl+n to import a verified contact without leaving the TUI."),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Verified contacts are labeled directly in the roster."),
+			style.Bold.Render("No chat selected"),
+			style.Muted.Render("Pick a contact from the sidebar to load the conversation."),
+			style.Muted.Render("Press ctrl+n to import a verified contact without leaving the TUI."),
+			style.Muted.Render("Verified contacts are labeled directly in the roster."),
 			"",
 			m.input.View(),
 		}
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(empty, "\n"))
 	}
+	if m.filePickerOpen {
+		return m.renderFilePicker(width)
+	}
 	header := []string{
-		lipgloss.NewStyle().Bold(true).Render(m.recipientMailbox),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf("fingerprint %s  %s", m.peerFingerprint, verificationLabel(m.peerVerified))),
+		style.Bold.Render(m.recipientMailbox),
+		style.Muted.Render(fmt.Sprintf("fingerprint %s  %s", m.peerFingerprint, verificationLabel(m.peerVerified))),
+		style.Muted.Render("ctrl+o attach file  |  /send-photo <path>  |  /send-voice <path>"),
 		m.viewport.View(),
 		m.renderTypingIndicator(),
 		m.input.View(),
@@ -876,8 +862,7 @@ func (m *Model) renderTypingIndicator() string {
 	if !m.peerTyping || m.recipientMailbox == "" {
 		return ""
 	}
-	dots := strings.Repeat(".", m.typingFrame+1)
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true).Render(fmt.Sprintf("%s is typing%s", m.recipientMailbox, dots))
+	return style.Italic.Render(fmt.Sprintf("%s is typing %s", m.recipientMailbox, m.typingSpinner.View()))
 }
 
 func (m *Model) upsertContact(contact *identity.Contact) {
@@ -925,6 +910,46 @@ func (m *Model) handleAuthFailure(err error) {
 	m.syncInputPlaceholder()
 }
 
+func (m *Model) markConnected(status string) {
+	m.connecting = false
+	m.connected = true
+	m.authFailed = false
+	m.disconnected = false
+	m.reconnectAttempt = 0
+	m.syncInputPlaceholder()
+	m.status = status
+}
+
+func (m *Model) handleConnectionError(err error) tea.Cmd {
+	if transport.IsUnauthorized(err) {
+		m.handleAuthFailure(err)
+		return nil
+	}
+	m.status = fmt.Sprintf("disconnected: %v", err)
+	m.disconnected = true
+	m.connected = false
+	m.resetLocalTypingState()
+	return m.reconnectCmd()
+}
+
+func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string, string) (*messaging.OutgoingBatch, string, error)) (*Model, tea.Cmd) {
+	path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, prefix)))
+	if path == "" {
+		m.status = fmt.Sprintf("usage: %s <path>", prefix)
+		return m, nil
+	}
+	batch, displayBody, err := prepare(m.recipientMailbox, path)
+	if err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+	m.input.SetValue("")
+	m.resetLocalTypingState()
+	m.syncViewport()
+	return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+}
+
 func (m *Model) handleInputActivity(previousValue, currentValue string) tea.Cmd {
 	if previousValue == currentValue {
 		return nil
@@ -970,5 +995,201 @@ func (m *Model) resetLocalTypingState() {
 func (m *Model) clearPeerTyping() {
 	m.peerTyping = false
 	m.peerTypingExpiresAt = time.Time{}
-	m.typingFrame = 0
+	m.typingSpinner = spinner.New()
+	m.typingSpinner.Spinner = spinner.Dot
+	m.typingSpinner.Style = style.Muted
+}
+
+func defaultFilePickerDir() string {
+	if dir, err := os.Getwd(); err == nil && dir != "" {
+		return dir
+	}
+	if dir, err := os.UserHomeDir(); err == nil && dir != "" {
+		return dir
+	}
+	return string(filepath.Separator)
+}
+
+func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
+	var (
+		batch       *messaging.OutgoingBatch
+		displayBody string
+		err         error
+	)
+	switch attachmentType {
+	case attachmentModePhoto:
+		batch, displayBody, err = m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
+	case attachmentModeVoice:
+		batch, displayBody, err = m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
+	case attachmentModeFile:
+		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.recipientMailbox, path)
+	default:
+		m.status = fmt.Sprintf("unsupported attachment type %q", attachmentType)
+		return nil
+	}
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+	m.input.SetValue("")
+	m.resetLocalTypingState()
+	m.syncViewport()
+	m.status = fmt.Sprintf("sending %s to %s", attachmentLabel(attachmentType), m.recipientMailbox)
+	return m.sendCmd(m.recipientMailbox, displayBody, batch)
+}
+
+func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeFilePicker("file picker closed")
+		return nil
+	case tea.KeyBackspace:
+		if err := m.goToParentDirectory(); err != nil {
+			m.status = fmt.Sprintf("file picker failed: %v", err)
+		}
+		return nil
+	case tea.KeyUp:
+		m.moveFilePickerSelection(-1)
+		return nil
+	case tea.KeyDown:
+		m.moveFilePickerSelection(1)
+		return nil
+	case tea.KeyEnter:
+		entry := m.selectedFilePickerEntry()
+		if entry == nil {
+			return nil
+		}
+		if entry.IsDir {
+			if err := m.openFilePickerAt(entry.Path); err != nil {
+				m.status = fmt.Sprintf("open directory failed: %v", err)
+			}
+			return nil
+		}
+		m.closeFilePicker(fmt.Sprintf("selected %s", entry.Name))
+		return m.sendAttachment(entry.Path, attachmentModeFile)
+	}
+	return nil
+}
+
+func (m *Model) openFilePicker() error {
+	return m.openFilePickerAt(m.filePickerDir)
+}
+
+func (m *Model) openFilePickerAt(dir string) error {
+	entries, cleanedDir, err := readFilePickerEntries(dir)
+	if err != nil {
+		return err
+	}
+	m.filePickerOpen = true
+	m.filePickerDir = cleanedDir
+	m.filePickerEntries = entries
+	m.filePickerSelected = 0
+	m.input.Blur()
+	m.status = fmt.Sprintf("attach a file for %s", m.recipientMailbox)
+	return nil
+}
+
+func (m *Model) closeFilePicker(status string) {
+	m.filePickerOpen = false
+	m.filePickerEntries = nil
+	m.filePickerSelected = 0
+	m.input.Focus()
+	if status != "" {
+		m.status = status
+	}
+}
+
+func (m *Model) goToParentDirectory() error {
+	parent := filepath.Dir(m.filePickerDir)
+	if parent == m.filePickerDir {
+		return nil
+	}
+	return m.openFilePickerAt(parent)
+}
+
+func (m *Model) moveFilePickerSelection(delta int) {
+	if len(m.filePickerEntries) == 0 {
+		return
+	}
+	m.filePickerSelected += delta
+	if m.filePickerSelected < 0 {
+		m.filePickerSelected = 0
+	}
+	if m.filePickerSelected >= len(m.filePickerEntries) {
+		m.filePickerSelected = len(m.filePickerEntries) - 1
+	}
+}
+
+func (m *Model) selectedFilePickerEntry() *filePickerEntry {
+	if m.filePickerSelected < 0 || m.filePickerSelected >= len(m.filePickerEntries) {
+		return nil
+	}
+	return &m.filePickerEntries[m.filePickerSelected]
+}
+
+func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
+	cleanedDir := filepath.Clean(dir)
+	entries, err := os.ReadDir(cleanedDir)
+	if err != nil {
+		return nil, "", err
+	}
+	items := make([]filePickerEntry, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		items = append(items, filePickerEntry{
+			Name:  name,
+			Path:  filepath.Join(cleanedDir, name),
+			IsDir: entry.IsDir(),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsDir != items[j].IsDir {
+			return items[i].IsDir
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+	return items, cleanedDir, nil
+}
+
+func (m *Model) renderFilePicker(width int) string {
+	title := lipgloss.NewStyle().Bold(true).Render("Attach File")
+	dirLine := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(m.filePickerDir)
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("enter open/select  |  backspace up  |  esc cancel")
+	lines := []string{title, dirLine, hint, ""}
+	if len(m.filePickerEntries) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("This directory is empty."))
+	} else {
+		for idx, entry := range m.filePickerEntries {
+			label := entry.Name
+			if entry.IsDir {
+				label += string(filepath.Separator)
+			}
+			style := lipgloss.NewStyle()
+			if entry.IsDir {
+				style = style.Foreground(lipgloss.Color("86"))
+			}
+			if idx == m.filePickerSelected {
+				style = style.Background(lipgloss.Color("238")).Bold(true)
+			}
+			lines = append(lines, style.Render(label))
+		}
+	}
+	modalWidth := min(max(48, width-6), width)
+	modalHeight := max(8, m.height-4)
+	modal := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+}
+
+func attachmentLabel(attachmentType string) string {
+	switch attachmentType {
+	case attachmentModePhoto:
+		return "photo"
+	case attachmentModeVoice:
+		return "voice note"
+	case attachmentModeFile:
+		return "file"
+	default:
+		return "attachment"
+	}
 }

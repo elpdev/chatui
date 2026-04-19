@@ -20,6 +20,7 @@ const (
 	typingStateIdle            = "idle"
 	attachmentTypePhoto        = "photo"
 	attachmentTypeVoice        = "voice"
+	attachmentTypeFile         = "file"
 	attachmentChunkSizeBytes   = 8 * 1024
 	maxAttachmentSizeBytes     = 50 * 1024 * 1024
 	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
