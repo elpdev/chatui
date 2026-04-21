@@ -99,6 +99,13 @@ func New(deps Deps) *Model {
 				return style.Current().Name
 			},
 			saveTheme: deps.SaveTheme,
+			currentMessageTTL: func() time.Duration {
+				if deps.Messaging == nil {
+					return 0
+				}
+				return deps.Messaging.MessageTTL()
+			},
+			saveMessageTTL: deps.SaveMessageTTL,
 		}),
 		unread: map[string]int{},
 	}
