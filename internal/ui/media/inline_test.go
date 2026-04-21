@@ -55,6 +55,9 @@ func TestRenderFileKittyInsideTmux(t *testing.T) {
 	if !strings.Contains(rendered, "\x1b_G") {
 		t.Fatalf("expected kitty graphics payload, got %q", rendered)
 	}
+	if !strings.Contains(rendered, "z=-1") {
+		t.Fatalf("expected kitty placement to render below UI, got %q", rendered)
+	}
 }
 
 func writeTinyPNG(t *testing.T) string {

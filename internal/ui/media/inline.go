@@ -102,9 +102,9 @@ func renderKitty(path string, maxCols, rows int) (string, error) {
 		chunk := encoded[i:end]
 		first := i == 0
 		last := end == len(encoded)
-		opts := make([]string, 0, 8)
+		opts := make([]string, 0, 9)
 		if first {
-			opts = append(opts, "a=T", "f=100", fmt.Sprintf("c=%d", maxCols), fmt.Sprintf("r=%d", rows), "C=1", "q=2")
+			opts = append(opts, "a=T", "f=100", fmt.Sprintf("c=%d", maxCols), fmt.Sprintf("r=%d", rows), "C=1", "q=2", "z=-1")
 		}
 		switch {
 		case first && !last:
