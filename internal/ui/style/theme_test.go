@@ -21,7 +21,6 @@ func TestThemesArePopulated(t *testing.T) {
 		{"Bright", func(th Theme) lipgloss.Color { return th.Bright }},
 		{"BgSel", func(th Theme) lipgloss.Color { return th.BgSel }},
 		{"BgModal", func(th Theme) lipgloss.Color { return th.BgModal }},
-		{"BgPalette", func(th Theme) lipgloss.Color { return th.BgPalette }},
 		{"Divider", func(th Theme) lipgloss.Color { return th.Divider }},
 		{"Ok", func(th Theme) lipgloss.Color { return th.Ok }},
 		{"Warn", func(th Theme) lipgloss.Color { return th.Warn }},
