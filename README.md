@@ -5,7 +5,7 @@
   <img src="internal/relay/logo.webp" alt="Pando" width="160">
 </picture>
 
-Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through a network of self-hosted relays.
+Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through self-hosted relays, not stored on them. Messages for online recipients are delivered live and never retained by the relay; messages sent to offline recipients are queued for up to 24 hours or until they log in, whichever comes first.
 
 ## Install
 
