@@ -312,14 +312,14 @@ func resolveRelayConfig(rootDir, relayURL, relayToken string) (string, string, e
 	}
 	resolvedRelayURL := relayURL
 	if resolvedRelayURL == "" {
-		resolvedRelayURL = devCfg.RelayURL
+		resolvedRelayURL = devCfg.ActiveRelayProfile().URL
 	}
 	if resolvedRelayURL == "" {
 		resolvedRelayURL = config.DefaultClient().RelayURL
 	}
 	resolvedRelayToken := relayToken
 	if resolvedRelayToken == "" {
-		resolvedRelayToken = devCfg.RelayToken
+		resolvedRelayToken = devCfg.ActiveRelayProfile().Token
 	}
 	return resolvedRelayURL, resolvedRelayToken, nil
 }

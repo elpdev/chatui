@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -15,6 +16,9 @@ type commandPaletteMode int
 const (
 	commandPaletteModeRoot commandPaletteMode = iota
 	commandPaletteModeThemes
+	commandPaletteModeRelays
+	commandPaletteModeRemoveRelay
+	commandPaletteModeEditRelay
 )
 
 type commandPaletteCommand string
@@ -24,13 +28,20 @@ const (
 	commandPaletteCommandAttachFile      commandPaletteCommand = "attach-file"
 	commandPaletteCommandContactRequests commandPaletteCommand = "contact-requests"
 	commandPaletteCommandPeerDetail      commandPaletteCommand = "peer-detail"
+	commandPaletteCommandRelays          commandPaletteCommand = "relays"
+	commandPaletteCommandAddRelay        commandPaletteCommand = "add-relay"
+	commandPaletteCommandRemoveRelay     commandPaletteCommand = "remove-relay"
+	commandPaletteCommandEditRelay       commandPaletteCommand = "edit-relay"
+	commandPaletteCommandSwitchRelay     commandPaletteCommand = "switch-relay"
 	commandPaletteCommandThemes          commandPaletteCommand = "themes"
 )
 
 type commandPaletteDeps struct {
-	applyTheme   func(style.Theme)
-	currentTheme func() string
-	saveTheme    func(name string) error
+	applyTheme       func(style.Theme)
+	currentTheme     func() string
+	saveTheme        func(name string) error
+	currentRelayName func() string
+	relayProfiles    func() []config.RelayProfile
 }
 
 type commandPaletteItem struct {
@@ -49,6 +60,7 @@ type commandPaletteVisibleItem struct {
 type commandPaletteAction struct {
 	command   commandPaletteCommand
 	themeName string
+	relayName string
 }
 
 type commandPaletteModel struct {
@@ -91,7 +103,7 @@ func (m *commandPaletteModel) Close() {
 }
 
 func (m *commandPaletteModel) back() {
-	if m.mode == commandPaletteModeThemes {
+	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeRelays || m.mode == commandPaletteModeRemoveRelay || m.mode == commandPaletteModeEditRelay {
 		m.mode = commandPaletteModeRoot
 		m.selected = 0
 		m.filter.SetValue("")
@@ -150,11 +162,38 @@ func (m *commandPaletteModel) activate(item commandPaletteItem) (*commandPalette
 			m.filter.SetValue("")
 			return nil, nil
 		}
+		if item.id == string(commandPaletteCommandRelays) {
+			m.mode = commandPaletteModeRelays
+			m.selected = 0
+			m.filter.SetValue("")
+			return nil, nil
+		}
+		if item.id == string(commandPaletteCommandRemoveRelay) {
+			m.mode = commandPaletteModeRemoveRelay
+			m.selected = 0
+			m.filter.SetValue("")
+			return nil, nil
+		}
+		if item.id == string(commandPaletteCommandEditRelay) {
+			m.mode = commandPaletteModeEditRelay
+			m.selected = 0
+			m.filter.SetValue("")
+			return nil, nil
+		}
 		m.Close()
 		return &commandPaletteAction{command: commandPaletteCommand(item.id)}, nil
 	case commandPaletteModeThemes:
 		m.Close()
 		return &commandPaletteAction{command: commandPaletteCommandThemes, themeName: item.id}, nil
+	case commandPaletteModeRelays:
+		m.Close()
+		return &commandPaletteAction{command: commandPaletteCommandSwitchRelay, relayName: item.id}, nil
+	case commandPaletteModeRemoveRelay:
+		m.Close()
+		return &commandPaletteAction{command: commandPaletteCommandRemoveRelay, relayName: item.id}, nil
+	case commandPaletteModeEditRelay:
+		m.Close()
+		return &commandPaletteAction{command: commandPaletteCommandEditRelay, relayName: item.id}, nil
 	default:
 		return nil, nil
 	}
@@ -183,6 +222,15 @@ func (m commandPaletteModel) title() string {
 	if m.mode == commandPaletteModeThemes {
 		return "Themes"
 	}
+	if m.mode == commandPaletteModeRelays {
+		return "Relays"
+	}
+	if m.mode == commandPaletteModeRemoveRelay {
+		return "Remove Relay"
+	}
+	if m.mode == commandPaletteModeEditRelay {
+		return "Edit Relay"
+	}
 	return "Command Palette"
 }
 
@@ -194,6 +242,19 @@ func (m commandPaletteModel) subtitle(peerLabel string) string {
 		}
 		return fmt.Sprintf("Choose a theme. Current: %s", current)
 	}
+	if m.mode == commandPaletteModeRelays {
+		current := m.currentRelayName()
+		if current == "" {
+			return "Choose the active relay for this device."
+		}
+		return fmt.Sprintf("Choose the active relay. Current: %s", current)
+	}
+	if m.mode == commandPaletteModeRemoveRelay {
+		return "Remove a saved relay profile. The active relay cannot leave you with none saved."
+	}
+	if m.mode == commandPaletteModeEditRelay {
+		return "Choose a saved relay profile to update its name, URL, or token."
+	}
 	if m.hasPeer {
 		return fmt.Sprintf("Jump to actions for %s or the current session.", peerLabel)
 	}
@@ -203,6 +264,15 @@ func (m commandPaletteModel) subtitle(peerLabel string) string {
 func (m commandPaletteModel) footer() string {
 	if m.mode == commandPaletteModeThemes {
 		return "type filter · up/down browse · enter apply · esc back"
+	}
+	if m.mode == commandPaletteModeRelays {
+		return "type filter · up/down browse · enter switch · esc back"
+	}
+	if m.mode == commandPaletteModeRemoveRelay {
+		return "type filter · up/down browse · enter remove · esc back"
+	}
+	if m.mode == commandPaletteModeEditRelay {
+		return "type filter · up/down browse · enter edit · esc back"
 	}
 	return "type filter · up/down browse · enter select · esc close"
 }
@@ -257,6 +327,15 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 	if m.mode == commandPaletteModeThemes {
 		return m.themeItems()
 	}
+	if m.mode == commandPaletteModeRelays {
+		return m.relayItems(false)
+	}
+	if m.mode == commandPaletteModeRemoveRelay {
+		return m.relayItems(true)
+	}
+	if m.mode == commandPaletteModeEditRelay {
+		return m.relayItems(false)
+	}
 	items := []commandPaletteItem{
 		{
 			id:      string(commandPaletteCommandAddContact),
@@ -280,6 +359,34 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 			aliases: []string{"attach", "file", "upload"},
 		},
 		{
+			id:      string(commandPaletteCommandRelays),
+			title:   "Relay",
+			detail:  "Switch the active relay, reconnect, and use it for discovery.",
+			meta:    "RELAY",
+			aliases: []string{"relay", "switch", "server"},
+		},
+		{
+			id:      string(commandPaletteCommandAddRelay),
+			title:   "Add relay",
+			detail:  "Save a new relay profile with name, URL, and optional token.",
+			meta:    "RELAY",
+			aliases: []string{"relay", "add", "server"},
+		},
+		{
+			id:      string(commandPaletteCommandRemoveRelay),
+			title:   "Remove relay",
+			detail:  "Delete a saved relay profile and keep another relay active.",
+			meta:    "RELAY",
+			aliases: []string{"relay", "remove", "delete", "server"},
+		},
+		{
+			id:      string(commandPaletteCommandEditRelay),
+			title:   "Edit relay",
+			detail:  "Update a saved relay profile, including its name, URL, or token.",
+			meta:    "RELAY",
+			aliases: []string{"relay", "edit", "rename", "server"},
+		},
+		{
 			id:      string(commandPaletteCommandThemes),
 			title:   "Themes",
 			detail:  "Switch the active terminal theme and save it to device config.",
@@ -297,6 +404,43 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 		})
 	}
 	return items
+}
+
+func (m commandPaletteModel) relayItems(remove bool) []commandPaletteItem {
+	if m.deps.relayProfiles == nil {
+		return nil
+	}
+	relays := m.deps.relayProfiles()
+	current := m.currentRelayName()
+	items := make([]commandPaletteItem, 0, len(relays))
+	for _, relay := range relays {
+		detail := relay.URL
+		meta := ""
+		if relay.Token != "" {
+			detail += "  token configured"
+		}
+		if relay.Name == current {
+			meta = "ACTIVE"
+		}
+		if remove && len(relays) <= 1 {
+			meta = "LOCKED"
+		}
+		items = append(items, commandPaletteItem{
+			id:      relay.Name,
+			title:   relay.Name,
+			detail:  detail,
+			meta:    meta,
+			aliases: []string{relay.Name, relay.URL, "relay"},
+		})
+	}
+	return items
+}
+
+func (m commandPaletteModel) currentRelayName() string {
+	if m.deps.currentRelayName == nil {
+		return ""
+	}
+	return m.deps.currentRelayName()
 }
 
 func (m commandPaletteModel) themeItems() []commandPaletteItem {

@@ -3,6 +3,7 @@ package chat
 import (
 	"time"
 
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
@@ -10,14 +11,17 @@ import (
 )
 
 type Deps struct {
-	Client             transport.Client
-	Messaging          *messaging.Service
-	Mailbox            string
-	RecipientMailbox   string
-	RelayURL           string
-	RelayToken         string
-	RelayClientFactory func(url, token string) (RelayClient, error)
-	SaveTheme          func(name string) error
+	Client                transport.Client
+	Messaging             *messaging.Service
+	Mailbox               string
+	RecipientMailbox      string
+	RelayURL              string
+	RelayToken            string
+	RelayProfiles         []config.RelayProfile
+	RelayClientFactory    func(url, token string) (RelayClient, error)
+	RelayTransportFactory func(url, token string) transport.Client
+	SaveTheme             func(name string) error
+	SaveRelays            func(relays []config.RelayProfile, active string) error
 }
 
 // Dependencies.
@@ -130,9 +134,18 @@ const toastLifetime = 3 * time.Second
 
 // Internal tea.Msg types.
 
-type clientEventMsg transport.Event
-type connectResultMsg struct{ err error }
-type reconnectResultMsg struct{ err error }
+type clientEventMsg struct {
+	client transport.Client
+	event  transport.Event
+}
+type connectResultMsg struct {
+	client transport.Client
+	err    error
+}
+type reconnectResultMsg struct {
+	client transport.Client
+	err    error
+}
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
 type roomHistorySyncResultMsg struct {
@@ -143,6 +156,12 @@ type roomHistorySyncResultMsg struct {
 type filePickerClosedMsg struct{}
 type filePickerErrorMsg struct{ err error }
 type filePickerSelectedMsg struct{ path string }
+type addRelaySavedMsg struct{ relay config.RelayProfile }
+type addRelayClosedMsg struct{ keepStatus bool }
+type editRelaySavedMsg struct {
+	original string
+	relay    config.RelayProfile
+}
 
 type sendResultMsg struct {
 	recipient  string

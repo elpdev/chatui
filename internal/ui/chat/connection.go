@@ -12,13 +12,14 @@ import (
 
 func (m *Model) connectCmd() tea.Cmd {
 	m.conn.connecting = true
+	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := m.client.Connect(ctx); err != nil {
-			return connectResultMsg{err: err}
+		if err := client.Connect(ctx); err != nil {
+			return connectResultMsg{client: client, err: err}
 		}
-		return connectResultMsg{}
+		return connectResultMsg{client: client}
 	}
 }
 
@@ -33,24 +34,26 @@ func (m *Model) reconnectCmd() tea.Cmd {
 	m.conn.connecting = true
 	m.conn.reconnectDelay = delay
 	m.conn.status = fmt.Sprintf("reconnecting in %s", delay)
+	client := m.client
 	return func() tea.Msg {
 		time.Sleep(delay)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := m.client.Connect(ctx); err != nil {
-			return reconnectResultMsg{err: err}
+		if err := client.Connect(ctx); err != nil {
+			return reconnectResultMsg{client: client, err: err}
 		}
-		return reconnectResultMsg{}
+		return reconnectResultMsg{client: client}
 	}
 }
 
 func (m *Model) waitForEvent() tea.Cmd {
+	client := m.client
 	return func() tea.Msg {
-		event, ok := <-m.client.Events()
+		event, ok := <-client.Events()
 		if !ok {
-			return clientEventMsg(transport.Event{Err: fmt.Errorf("connection closed")})
+			return clientEventMsg{client: client, event: transport.Event{Err: fmt.Errorf("connection closed")}}
 		}
-		return clientEventMsg(event)
+		return clientEventMsg{client: client, event: event}
 	}
 }
 

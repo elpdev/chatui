@@ -4,13 +4,19 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/elpdev/pando/internal/config"
+	"github.com/elpdev/pando/internal/transport"
 )
 
 type relayState struct {
-	url           string
-	token         string
-	client        RelayClient
-	clientFactory func(url, token string) (RelayClient, error)
+	url              string
+	token            string
+	active           string
+	profiles         []config.RelayProfile
+	client           RelayClient
+	clientFactory    func(url, token string) (RelayClient, error)
+	transportFactory func(url, token string) transport.Client
+	saveProfiles     func(relays []config.RelayProfile, active string) error
 }
 
 type peerState struct {

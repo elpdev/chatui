@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/messaging"
@@ -45,6 +46,27 @@ func (c *recordingClient) Send(envelope protocol.Envelope) error {
 }
 func (c *recordingClient) Close() error { return nil }
 
+type switchClient struct {
+	name   string
+	closed bool
+	events chan transport.Event
+}
+
+func newSwitchClient(name string) *switchClient {
+	return &switchClient{name: name, events: make(chan transport.Event)}
+}
+
+func (c *switchClient) Connect(context.Context) error  { return nil }
+func (c *switchClient) Events() <-chan transport.Event { return c.events }
+func (c *switchClient) Send(protocol.Envelope) error   { return nil }
+func (c *switchClient) Close() error {
+	if !c.closed {
+		c.closed = true
+		close(c.events)
+	}
+	return nil
+}
+
 func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")
@@ -71,7 +93,7 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 		t.Fatalf("expected local history to be loaded, got %d messages", len(model.msgs.rendered))
 	}
 
-	updated, cmd := model.Update(clientEventMsg(transport.Event{Err: fmt.Errorf("%w: check relay token", transport.ErrUnauthorized)}))
+	updated, cmd := model.Update(clientEventMsg{client: model.client, event: transport.Event{Err: fmt.Errorf("%w: check relay token", transport.ErrUnauthorized)}})
 	if updated != model {
 		t.Fatal("expected update to mutate the existing model")
 	}
@@ -607,7 +629,7 @@ func TestBootstrapConnectFailureStopsReconnectLoop(t *testing.T) {
 	})
 
 	err = fmt.Errorf("publish your signed relay directory entry before connecting: run `pando contact publish-directory --mailbox alice`")
-	updated, cmd := model.Update(connectResultMsg{err: err})
+	updated, cmd := model.Update(connectResultMsg{client: model.client, err: err})
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
@@ -646,7 +668,7 @@ func TestUnauthorizedDeviceConnectFailureStopsReconnectLoop(t *testing.T) {
 	})
 
 	err = fmt.Errorf("device is not authorized for this mailbox")
-	_, cmd := model.Update(reconnectResultMsg{err: err})
+	_, cmd := model.Update(reconnectResultMsg{client: model.client, err: err})
 	if cmd != nil {
 		t.Fatal("expected no reconnect command for unauthorized device")
 	}
@@ -1750,6 +1772,166 @@ func TestCommandPaletteAppliesAndPersistsTheme(t *testing.T) {
 	}
 	if model.commandPalette.open {
 		t.Fatal("expected theme selection to close command palette")
+	}
+}
+
+func TestCommandPaletteSwitchesRelay(t *testing.T) {
+	model := newHelpTestModel(t)
+	current := newSwitchClient("home")
+	created := []*switchClient{current}
+	savedActive := ""
+	model.client = current
+	model.relay.profiles = []config.RelayProfile{{Name: "home", URL: "ws://home/ws"}, {Name: "prod", URL: "wss://relay.example/ws", Token: "secret"}}
+	model.relay.active = "home"
+	model.relay.url = "ws://home/ws"
+	model.relay.transportFactory = func(url, token string) transport.Client {
+		client := newSwitchClient(url)
+		created = append(created, client)
+		return client
+	}
+	model.relay.saveProfiles = func(relays []config.RelayProfile, active string) error {
+		savedActive = active
+		return nil
+	}
+
+	openPalette(t, model)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("relay")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.commandPalette.mode != commandPaletteModeRelays {
+		t.Fatal("expected relay submenu to open")
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected relay switch command")
+	}
+	if model.relay.active != "prod" {
+		t.Fatalf("expected active relay prod, got %q", model.relay.active)
+	}
+	if savedActive != "prod" {
+		t.Fatalf("expected save callback for prod, got %q", savedActive)
+	}
+	if !current.closed {
+		t.Fatal("expected previous client to close on relay switch")
+	}
+	if model.relay.url != "wss://relay.example/ws" {
+		t.Fatalf("expected relay URL to switch, got %q", model.relay.url)
+	}
+	if len(created) < 2 {
+		t.Fatalf("expected new client creation, got %d clients", len(created))
+	}
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after relay selection")
+	}
+}
+
+func TestAddRelayModalSavesRelayProfile(t *testing.T) {
+	model := newHelpTestModel(t)
+	savedActive := ""
+	model.relay.profiles = []config.RelayProfile{{Name: "home", URL: "ws://home/ws"}}
+	model.relay.active = "home"
+	model.relay.url = "ws://home/ws"
+	model.relay.transportFactory = func(url, token string) transport.Client { return newSwitchClient(url) }
+	model.relay.saveProfiles = func(relays []config.RelayProfile, active string) error {
+		savedActive = active
+		return nil
+	}
+
+	openPaletteCommand(t, model, "add relay")
+	if !model.addRelay.open {
+		t.Fatal("expected add relay modal to open")
+	}
+	for _, text := range []string{"prod", "wss://relay.example/ws", "secret"} {
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	}
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected add relay save command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected add relay save message")
+	}
+	_, _ = model.Update(msg)
+	if model.addRelay.open {
+		t.Fatal("expected add relay modal to close after save")
+	}
+	if savedActive != "prod" {
+		t.Fatalf("expected new relay to become active, got %q", savedActive)
+	}
+	if _, ok := model.lookupRelayProfile("prod"); !ok {
+		t.Fatal("expected prod relay to be saved")
+	}
+}
+
+func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
+	model := newHelpTestModel(t)
+	savedActive := ""
+	model.relay.profiles = []config.RelayProfile{{Name: "home", URL: "ws://home/ws"}, {Name: "prod", URL: "wss://relay.example/ws", Token: "secret"}}
+	model.relay.active = "prod"
+	model.relay.url = "wss://relay.example/ws"
+	model.relay.token = "secret"
+	model.relay.transportFactory = func(url, token string) transport.Client { return newSwitchClient(url) }
+	model.relay.saveProfiles = func(relays []config.RelayProfile, active string) error {
+		savedActive = active
+		return nil
+	}
+
+	openPaletteCommand(t, model, "edit relay")
+	if model.commandPalette.mode != commandPaletteModeEditRelay {
+		t.Fatal("expected edit relay submenu to open")
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		drainMsg(t, model, cmd)
+	}
+	if !model.addRelay.open || !model.addRelay.editing {
+		t.Fatal("expected edit relay modal to open")
+	}
+	if model.addRelay.inputs[0].Value() != "prod" {
+		t.Fatalf("expected relay form to load current name, got %q", model.addRelay.inputs[0].Value())
+	}
+	for i := 0; i < 4; i++ {
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("edge")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	for i := 0; i < len("wss://relay.example/ws"); i++ {
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("wss://edge.example/ws")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	for i := 0; i < len("secret"); i++ {
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("rotated")})
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected edit relay save command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected edit relay save message")
+	}
+	_, next := model.Update(msg)
+	drainMsg(t, model, next)
+	if model.addRelay.open {
+		t.Fatal("expected edit relay modal to close after save")
+	}
+	if savedActive != "edge" {
+		t.Fatalf("expected renamed relay to become active selection, got %q", savedActive)
+	}
+	updated, ok := model.lookupRelayProfile("edge")
+	if !ok {
+		t.Fatal("expected updated relay profile to be saved")
+	}
+	if updated.URL != "wss://edge.example/ws" || updated.Token != "rotated" {
+		t.Fatalf("unexpected updated relay: %+v", updated)
+	}
+	if model.relay.active != "edge" {
+		t.Fatalf("expected active relay name to update, got %q", model.relay.active)
 	}
 }
 

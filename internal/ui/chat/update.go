@@ -202,7 +202,10 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 }
 
 func (m *Model) handleClientEventMsg(msg clientEventMsg) (*Model, tea.Cmd) {
-	event := transport.Event(msg)
+	if msg.client != m.client {
+		return m, nil
+	}
+	event := msg.event
 	if event.Err != nil {
 		return m, m.handleConnectionError(event.Err)
 	}
@@ -212,7 +215,10 @@ func (m *Model) handleClientEventMsg(msg clientEventMsg) (*Model, tea.Cmd) {
 	return m, m.waitForEvent()
 }
 
-func (m *Model) handleConnectResultMsg(err error) (*Model, tea.Cmd) {
+func (m *Model) handleConnectResultMsg(client transport.Client, err error) (*Model, tea.Cmd) {
+	if client != m.client {
+		return m, nil
+	}
 	if err != nil {
 		return m, m.handleConnectionError(err)
 	}

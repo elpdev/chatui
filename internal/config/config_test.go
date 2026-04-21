@@ -37,11 +37,14 @@ func TestClientValidateAllowsEmptyRecipientMailbox(t *testing.T) {
 	}
 }
 
-func TestDeviceConfigRoundTripIncludesRelayToken(t *testing.T) {
+func TestDeviceConfigRoundTripIncludesRelayProfiles(t *testing.T) {
 	rootDir := t.TempDir()
 	want := DeviceConfig{
-		RelayURL:       "wss://relay.example/ws",
-		RelayToken:     "secret-token",
+		Relays: []RelayProfile{
+			{Name: "home", URL: "ws://localhost:8080/ws"},
+			{Name: "prod", URL: "wss://relay.example/ws", Token: "secret-token"},
+		},
+		ActiveRelay:    "prod",
 		DefaultMailbox: "alice",
 	}
 	if err := SaveDeviceConfig(rootDir, want); err != nil {
@@ -51,16 +54,47 @@ func TestDeviceConfigRoundTripIncludesRelayToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load device config: %v", err)
 	}
-	if got != want {
+	if got.ActiveRelay != want.ActiveRelay || got.DefaultMailbox != want.DefaultMailbox || len(got.Relays) != len(want.Relays) {
 		t.Fatalf("expected device config %+v, got %+v", want, got)
+	}
+	for i := range want.Relays {
+		if got.Relays[i] != want.Relays[i] {
+			t.Fatalf("expected relay %d %+v, got %+v", i, want.Relays[i], got.Relays[i])
+		}
+	}
+	if got.RelayURL != "wss://relay.example/ws" || got.RelayToken != "secret-token" {
+		t.Fatalf("expected active relay fields to mirror prod, got url=%q token=%q", got.RelayURL, got.RelayToken)
 	}
 	path := DeviceConfigPath(rootDir)
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
-	if !strings.Contains(string(bytes), "relay_token: secret-token") {
+	text := string(bytes)
+	if !strings.Contains(text, "active_relay: prod") || !strings.Contains(text, "name: prod") || !strings.Contains(text, "token: secret-token") {
 		t.Fatalf("expected relay_token in config file, got %q", string(bytes))
+	}
+}
+
+func TestDeviceConfigLegacySingleRelayMigratesToProfile(t *testing.T) {
+	rootDir := t.TempDir()
+	configYAML := "relay_url: wss://relay.example/ws\nrelay_token: secret-token\ndefault_mailbox: alice\n"
+	if err := os.WriteFile(DeviceConfigPath(rootDir), []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	got, err := LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	profiles := got.RelayProfiles()
+	if len(profiles) != 1 {
+		t.Fatalf("expected one migrated relay profile, got %d", len(profiles))
+	}
+	if profiles[0].URL != "wss://relay.example/ws" || profiles[0].Token != "secret-token" {
+		t.Fatalf("unexpected migrated profile: %+v", profiles[0])
+	}
+	if got.ActiveRelayProfile().URL != "wss://relay.example/ws" {
+		t.Fatalf("expected active relay to match legacy relay, got %+v", got.ActiveRelayProfile())
 	}
 }
 
