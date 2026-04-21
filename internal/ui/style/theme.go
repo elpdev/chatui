@@ -1,6 +1,10 @@
 package style
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme is the single source of truth for every color the TUI renders. Each
 // named palette entry maps to one or more exported Style tokens; downstream
@@ -33,8 +37,14 @@ type Theme struct {
 // Themes is the built-in registry. The active theme is always one of these;
 // downstream code selects by name via Apply.
 var Themes = map[string]Theme{
-	"default": defaultTheme(),
+	"default":  defaultTheme(),
+	"phosphor": phosphorTheme(),
 }
+
+// envThemeOverride is the env var callers can set to pick a theme at launch
+// before config-file selection is wired up. Unknown values fall back to the
+// default theme, silently — this is a convenience knob, not a strict API.
+const envThemeOverride = "PANDO_THEME"
 
 // active is the currently applied theme. Read-only for callers — swap via
 // Apply. Tests and the PeerAccent function consult it directly.
@@ -176,4 +186,52 @@ func defaultTheme() Theme {
 	}
 }
 
-func init() { Apply(Themes["default"]) }
+// phosphorTheme is a CRT-terminal palette inspired by classic amber-on-green
+// phosphor monitors. All values live on a cool navy base, with phosphor green
+// for primary text and warm amber as the accent. Try it via
+// PANDO_THEME=phosphor until config-based selection lands.
+func phosphorTheme() Theme {
+	return Theme{
+		Name: "phosphor",
+
+		Faint:  lipgloss.Color("#3A5A44"), // phosphor-faint
+		Muted:  lipgloss.Color("#5A8A68"), // phosphor-dim
+		Subtle: lipgloss.Color("#788E80"), // mid phosphor-gray, synthesized
+		Dim:    lipgloss.Color("#8FBDA0"), // lighter mid-phosphor, synthesized
+		Bright: lipgloss.Color("#9FE8B0"), // phosphor
+
+		BgSel:     lipgloss.Color("#18233D"), // bg-3
+		BgModal:   lipgloss.Color("#111A2C"), // bg-2
+		BgPalette: lipgloss.Color("#18233D"), // bg-3
+		Divider:   lipgloss.Color("#2A3752"), // hairline
+
+		Ok:   lipgloss.Color("#4FAE7A"), // moss
+		Warn: lipgloss.Color("#FFB347"), // amber
+		Bad:  lipgloss.Color("#FF5E5B"), // signal
+		Info: lipgloss.Color("#6FD0E3"), // cyan
+
+		BannerText:  lipgloss.Color("#9FE8B0"), // phosphor
+		BannerSlash: lipgloss.Color("#FFB347"), // amber
+		RoomAccent:  lipgloss.Color("#6FD0E3"), // cyan
+
+		PeerAccents: []lipgloss.Color{
+			lipgloss.Color("#9FE8B0"), // phosphor
+			lipgloss.Color("#6FD0E3"), // cyan
+			lipgloss.Color("#FFB347"), // amber
+			lipgloss.Color("#4FAE7A"), // moss
+			lipgloss.Color("#5A8A68"), // phosphor-dim
+			lipgloss.Color("#A87324"), // amber-dim
+			lipgloss.Color("#BEE8C8"), // pale phosphor, synthesized
+			lipgloss.Color("#5ACFE3"), // teal cyan, synthesized
+		},
+	}
+}
+
+func init() {
+	name := os.Getenv(envThemeOverride)
+	theme, ok := Themes[name]
+	if !ok {
+		theme = Themes["default"]
+	}
+	Apply(theme)
+}
