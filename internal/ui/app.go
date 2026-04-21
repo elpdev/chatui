@@ -12,10 +12,11 @@ import (
 )
 
 type App struct {
-	chat   *chat.Model
-	ready  bool
-	width  int
-	height int
+	chat       *chat.Model
+	ready      bool
+	width      int
+	height     int
+	lastInChat bool
 }
 
 func New(chatModel *chat.Model) *App {
@@ -32,7 +33,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.ready = true
-		a.chat.SetSize(msg.Width-2, msg.Height-headerRows(msg.Width, msg.Height)-1)
+		a.lastInChat = a.chat.RecipientMailbox() != ""
+		a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
 		return a, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -42,6 +44,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	_, cmd := a.chat.Update(msg)
+	// If opening/closing a conversation changed the banner mode, reflow the
+	// chat viewport so the freed (or consumed) banner rows get accounted for.
+	if a.ready {
+		inChat := a.chat.RecipientMailbox() != ""
+		if inChat != a.lastInChat {
+			a.lastInChat = inChat
+			a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
+		}
+	}
 	return a, cmd
 }
 
@@ -94,23 +105,35 @@ func colorizeLogoRow(row string) string {
 	return b.String()
 }
 
-// headerRows reports how many terminal rows the header occupies given the
-// current window size. The chat view uses this to size its message area.
-func headerRows(width, height int) int {
-	if width < bannerMinWidth || height < bannerMinHeight {
-		return 1
+// headerRows reports how many terminal rows the header occupies in the
+// current state. Four rows on the welcome screen (three for the wordmark
+// plus one meta line); one row once a conversation is open so message
+// history gets the real estate back.
+func (a *App) headerRows() int {
+	if a.showBanner() {
+		return 4
 	}
-	return 4
+	return 1
 }
 
-// renderHeader is the branded top strip. On a roomy terminal it renders a
-// three-row PANDO block with slash decoration, then a meta line beneath it
-// (identity, peer, connection pill, fingerprint). On narrow or short
-// terminals it collapses to a single utilitarian row.
+// showBanner is true when the big PANDO wordmark should be drawn — only on
+// terminals tall/wide enough for it and only while no conversation is open.
+func (a *App) showBanner() bool {
+	if a.width < bannerMinWidth || a.height < bannerMinHeight {
+		return false
+	}
+	return a.chat.RecipientMailbox() == ""
+}
+
+// renderHeader is the branded top strip. On the welcome screen it renders
+// a three-row PANDO wordmark with diagonal-slash decoration, then a meta
+// line beneath it (identity, connection pill). Once the user opens a
+// conversation it collapses to a single meta row so scrollback gets the
+// freed rows.
 //
 // All ephemeral feedback continues to live in the chat toast slot, not here.
 func (a *App) renderHeader() string {
-	if a.width < bannerMinWidth || a.height < bannerMinHeight {
+	if !a.showBanner() {
 		return a.renderMetaLine()
 	}
 	lead := style.Faint.Render(strings.Repeat("╱", bannerLeadSlash))
