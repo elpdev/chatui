@@ -50,7 +50,7 @@ func TestPeerAccentIsStable(t *testing.T) {
 }
 
 func TestPeerAccentEmptyFingerprintFallsBackToOk(t *testing.T) {
-	if PeerAccent("") != colorOk {
+	if PeerAccent("") != Current().Ok {
 		t.Errorf("empty fingerprint should map to ok color, got %v", PeerAccent(""))
 	}
 }
