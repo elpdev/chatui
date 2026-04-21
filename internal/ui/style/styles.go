@@ -111,6 +111,11 @@ var (
 			BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
 			BorderForeground(colorDivider)
 
+	SidebarBorderFocused = lipgloss.NewStyle().
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
+				BorderForeground(colorInfo)
+
 	ModalBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.ThickBorder()).
 			BorderForeground(colorInfo)
@@ -125,6 +130,8 @@ var (
 	InputBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(colorFaint)
+
+	InputFrame = lipgloss.NewStyle()
 )
 
 // ----------------------------------------------------------------------------
@@ -150,6 +157,7 @@ const (
 	GlyphActiveChat   = "●" // sidebar: currently open chat marker
 	GlyphUnreadDot    = "●" // sidebar: unread-count bullet
 	GlyphJumpToLatest = "↓"
+	GlyphPrompt       = "›"
 
 	GroupSep = "·" // fingerprint group separator
 )

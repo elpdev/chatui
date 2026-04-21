@@ -34,7 +34,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.ready = true
 		a.lastInChat = a.chat.RecipientMailbox() != ""
-		a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
+		a.chat.SetSize(a.width-2, a.height-a.headerRows()-a.footerRows())
 		return a, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -50,7 +50,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		inChat := a.chat.RecipientMailbox() != ""
 		if inChat != a.lastInChat {
 			a.lastInChat = inChat
-			a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
+			a.chat.SetSize(a.width-2, a.height-a.headerRows()-a.footerRows())
 		}
 	}
 	return a, cmd
@@ -60,7 +60,7 @@ func (a *App) View() string {
 	if !a.ready {
 		return "loading..."
 	}
-	return strings.Join([]string{a.renderHeader(), a.chat.View()}, "\n")
+	return strings.Join([]string{a.renderHeader(), a.chat.View(), a.renderFooter()}, "\n")
 }
 
 // Block-letter wordmark rendered in the branded banner. Each row is 20
@@ -116,6 +116,10 @@ func (a *App) headerRows() int {
 	return 1
 }
 
+func (a *App) footerRows() int {
+	return 1
+}
+
 // showBanner is true when the big PANDO wordmark should be drawn — only on
 // terminals tall/wide enough for it and only while no conversation is open.
 func (a *App) showBanner() bool {
@@ -154,6 +158,7 @@ func (a *App) renderHeader() string {
 // name (accent-colored), connection pill, and short fingerprint + verify
 // mark. Clipped to terminal width so the pill never wraps.
 func (a *App) renderMetaLine() string {
+	brand := style.Bold.Render("pando")
 	identity := style.Muted.Render(a.chat.Mailbox())
 
 	peerSeg := ""
@@ -174,12 +179,18 @@ func (a *App) renderMetaLine() string {
 		fpSeg = style.Muted.Render(style.FormatFingerprintShort(fp)) + " " + markStyle.Render(mark)
 	}
 
-	segs := []string{identity + peerSeg, pill}
+	segs := []string{brand + "  " + identity + peerSeg, pill}
 	if fpSeg != "" {
 		segs = append(segs, fpSeg)
 	}
 	row := strings.Join(segs, "    ")
 	return lipgloss.NewStyle().MaxWidth(a.width).Render(row)
+}
+
+func (a *App) renderFooter() string {
+	segments := a.chat.FooterSegments()
+	row := strings.Join(segments, "    ")
+	return style.Faint.Render(lipgloss.NewStyle().MaxWidth(a.width).Render(row))
 }
 
 func renderConnectionPill(state chat.ConnState, delay time.Duration, detail string) string {
