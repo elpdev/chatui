@@ -391,10 +391,10 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 		}
 		for _, envelope := range batch.Envelopes {
 			if err := m.client.Send(envelope); err != nil {
-				return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, err: err}
+				return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment, err: err}
 			}
 		}
-		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body}
+		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment}
 	}
 }
 

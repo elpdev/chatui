@@ -311,14 +311,14 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 		return nil
 	}
 	m.appendMessageItem(messageItem{
-		kind:         transcriptMessage,
-		direction:    "outbound",
-		sender:       m.mailbox,
-		body:         displayBody,
-		timestamp:    time.Now().UTC(),
-		messageID:    batchMessageID(batch),
-		status:       statusPending,
-		isAttachment: true,
+		kind:       transcriptMessage,
+		direction:  "outbound",
+		sender:     m.mailbox,
+		body:       displayBody,
+		timestamp:  time.Now().UTC(),
+		messageID:  batchMessageID(batch),
+		status:     statusPending,
+		attachment: batch.Attachment,
 	})
 	m.input.SetValue("")
 	m.syncComposer()

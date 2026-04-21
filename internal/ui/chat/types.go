@@ -5,6 +5,7 @@ import (
 
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
 )
 
@@ -55,15 +56,17 @@ const (
 // so the grouped renderer can reason about sender/time/delivery state without
 // having to parse strings.
 type messageItem struct {
-	kind         transcriptItemKind
-	direction    string // "outbound" | "inbound"
-	sender       string // mailbox that authored the message
-	body         string
-	timestamp    time.Time
-	messageID    string
-	status       deliveryStatus
-	isAttachment bool
-	meta         string
+	kind          transcriptItemKind
+	direction     string // "outbound" | "inbound"
+	sender        string // mailbox that authored the message
+	body          string
+	timestamp     time.Time
+	messageID     string
+	status        deliveryStatus
+	attachment    *store.AttachmentRecord
+	imageRendered string
+	imageWidth    int
+	meta          string
 }
 
 // deliveryStatus is a four-state outbound lifecycle. Inbound messages ignore
@@ -141,11 +144,12 @@ type filePickerErrorMsg struct{ err error }
 type filePickerSelectedMsg struct{ path string }
 
 type sendResultMsg struct {
-	recipient string
-	roomID    string
-	messageID string
-	body      string
-	err       error
+	recipient  string
+	roomID     string
+	messageID  string
+	body       string
+	attachment *store.AttachmentRecord
+	err        error
 }
 
 const (

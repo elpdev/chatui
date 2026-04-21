@@ -51,7 +51,7 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC()); err != nil {
+	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC(), nil); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 
@@ -101,6 +101,84 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	}
 	if len(model.msgs.rendered) < 1 {
 		t.Fatalf("expected local history to remain visible, got %d messages", len(model.msgs.rendered))
+	}
+}
+
+func TestLoadHistoryKeepsStructuredAttachmentMetadata(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	photoPath := filepath.Join(t.TempDir(), "photo.png")
+	if err := os.WriteFile(photoPath, mustPhotoBytes(t), 0o600); err != nil {
+		t.Fatalf("write photo: %v", err)
+	}
+	attachment := messaging.NewAttachmentRecord(messaging.AttachmentTypePhoto, "photo.png", "image/png", photoPath, 42)
+	if err := service.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "photo.png", photoPath), time.Now().UTC(), attachment); err != nil {
+		t.Fatalf("save photo history: %v", err)
+	}
+
+	model := New(Deps{Client: stubClient{}, Messaging: service, Mailbox: "alice", RecipientMailbox: "bob", RelayURL: "ws://localhost:8080/ws"})
+	model.Init()
+	if len(model.msgs.items) != 1 {
+		t.Fatalf("expected one history item, got %d", len(model.msgs.items))
+	}
+	if model.msgs.items[0].attachment == nil || model.msgs.items[0].attachment.LocalPath != photoPath {
+		t.Fatalf("expected structured attachment metadata on loaded history item, got %+v", model.msgs.items[0].attachment)
+	}
+}
+
+func TestLoadHistoryParsesLegacyAttachmentBody(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	photoPath := filepath.Join(t.TempDir(), "legacy-photo.png")
+	if err := os.WriteFile(photoPath, mustPhotoBytes(t), 0o600); err != nil {
+		t.Fatalf("write photo: %v", err)
+	}
+	if err := clientStore.AppendHistory(service.Identity(), store.MessageRecord{
+		PeerMailbox: "bob",
+		Direction:   "inbound",
+		Body:        messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "legacy-photo.png", photoPath),
+		Timestamp:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append legacy history: %v", err)
+	}
+
+	model := New(Deps{Client: stubClient{}, Messaging: service, Mailbox: "alice", RecipientMailbox: "bob", RelayURL: "ws://localhost:8080/ws"})
+	model.Init()
+	if len(model.msgs.items) != 1 {
+		t.Fatalf("expected one history item, got %d", len(model.msgs.items))
+	}
+	if model.msgs.items[0].attachment == nil || model.msgs.items[0].attachment.LocalPath != photoPath {
+		t.Fatalf("expected legacy attachment body to be parsed, got %+v", model.msgs.items[0].attachment)
 	}
 }
 
@@ -186,7 +264,7 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if err := clientStore.SaveContact(carolContact); err != nil {
 		t.Fatalf("save carol contact: %v", err)
 	}
-	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC()); err != nil {
+	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC(), nil); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 

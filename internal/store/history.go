@@ -9,13 +9,22 @@ import (
 )
 
 type MessageRecord struct {
-	MessageID   string    `json:"message_id,omitempty"`
-	PeerMailbox string    `json:"peer_mailbox"`
-	Direction   string    `json:"direction"`
-	Body        string    `json:"body"`
-	Delivered   bool      `json:"delivered,omitempty"`
-	DeliveredAt time.Time `json:"delivered_at,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
+	MessageID   string            `json:"message_id,omitempty"`
+	PeerMailbox string            `json:"peer_mailbox"`
+	Direction   string            `json:"direction"`
+	Body        string            `json:"body"`
+	Attachment  *AttachmentRecord `json:"attachment,omitempty"`
+	Delivered   bool              `json:"delivered,omitempty"`
+	DeliveredAt time.Time         `json:"delivered_at,omitempty"`
+	Timestamp   time.Time         `json:"timestamp"`
+}
+
+type AttachmentRecord struct {
+	Type      string `json:"type,omitempty"`
+	Filename  string `json:"filename,omitempty"`
+	MIMEType  string `json:"mime_type,omitempty"`
+	LocalPath string `json:"local_path,omitempty"`
+	Size      int64  `json:"size,omitempty"`
 }
 
 func (s *ClientStore) LoadHistory(id *identity.Identity, peerMailbox string) ([]MessageRecord, error) {

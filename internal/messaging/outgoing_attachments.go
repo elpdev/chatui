@@ -39,7 +39,8 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 	if err != nil {
 		return nil, "", err
 	}
-	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
+	attachment := NewAttachmentRecord(attachmentType, filename, mimeType, path, int64(len(bytes)))
+	return &OutgoingBatch{Envelopes: envelopes, Attachment: attachment}, AttachmentSentBody(attachmentType, filename), nil
 }
 func loadAttachmentPayload(path, attachmentType string) ([]byte, string, string, error) {
 	bytes, err := os.ReadFile(path)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -237,4 +238,22 @@ func AttachmentLabel(attachmentType string) string {
 	default:
 		return "attachment"
 	}
+}
+
+func NewAttachmentRecord(attachmentType, filename, mimeType, localPath string, size int64) *store.AttachmentRecord {
+	return &store.AttachmentRecord{
+		Type:      attachmentType,
+		Filename:  sanitizeAttachmentName(filename),
+		MIMEType:  mimeType,
+		LocalPath: localPath,
+		Size:      size,
+	}
+}
+
+func AttachmentSentBody(attachmentType, filename string) string {
+	return fmt.Sprintf("%s sent: %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename))
+}
+
+func AttachmentReceivedBody(attachmentType, filename, path string) string {
+	return fmt.Sprintf("%s received: %s saved to %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename), path)
 }
