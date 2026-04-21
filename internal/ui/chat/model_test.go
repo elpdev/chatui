@@ -51,7 +51,7 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC(), nil); err != nil {
+	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC(), nil, time.Time{}); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestLoadHistoryKeepsStructuredAttachmentMetadata(t *testing.T) {
 		t.Fatalf("write photo: %v", err)
 	}
 	attachment := messaging.NewAttachmentRecord(messaging.AttachmentTypePhoto, "photo.png", "image/png", photoPath, 42)
-	if err := service.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "photo.png", photoPath), time.Now().UTC(), attachment); err != nil {
+	if err := service.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "photo.png", photoPath), time.Now().UTC(), attachment, time.Time{}); err != nil {
 		t.Fatalf("save photo history: %v", err)
 	}
 
@@ -264,7 +264,7 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if err := clientStore.SaveContact(carolContact); err != nil {
 		t.Fatalf("save carol contact: %v", err)
 	}
-	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC(), nil); err != nil {
+	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC(), nil, time.Time{}); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 

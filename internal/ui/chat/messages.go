@@ -80,7 +80,7 @@ func (m *Model) handleIncomingAck() {
 
 func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope protocol.Envelope) {
 	if result.RoomID != "" {
-		if err := m.messaging.SaveDefaultRoomReceived(result.PeerAccountID, envelope.SenderMailbox, result.MessageID, result.Body, envelope.Timestamp); err != nil {
+		if err := m.messaging.SaveDefaultRoomReceived(result.PeerAccountID, envelope.SenderMailbox, result.MessageID, result.Body, envelope.Timestamp, result.ExpiresAt); err != nil {
 			m.pushToast(fmt.Sprintf("save room history failed: %v", err), ToastBad)
 			return
 		}
@@ -93,7 +93,7 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 		m.pushToast(fmt.Sprintf("new message in %s", messaging.DefaultRoomLabel()), ToastInfo)
 		return
 	}
-	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp, result.Attachment); err != nil {
+	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp, result.Attachment, result.ExpiresAt); err != nil {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return
 	}
