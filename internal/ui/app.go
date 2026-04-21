@@ -32,7 +32,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.ready = true
-		a.chat.SetSize(msg.Width-2, msg.Height-2)
+		a.chat.SetSize(msg.Width-2, msg.Height-headerRows(msg.Width, msg.Height)-1)
 		return a, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -52,12 +52,85 @@ func (a *App) View() string {
 	return strings.Join([]string{a.renderHeader(), a.chat.View()}, "\n")
 }
 
-// renderHeader produces a single styled row that owns every piece of
-// persistent state: app name, active identity, peer (in its accent color),
-// a connection pill, and the peer's short fingerprint + verification glyph.
-// Ephemeral feedback lives in the chat toast slot, not here.
+// Block-letter wordmark rendered in the branded banner. Each row is 20
+// columns wide; the banner decorator pads left/right with diagonal slashes
+// to fill the terminal width.
+var bannerLogo = [3]string{
+	"█▀▄ ▄▀█ █▄ █ █▀▄ █▀█",
+	"█▀  █▀█ █ ▀█ █ █ █ █",
+	"▀   ▀ ▀ ▀  ▀ ▀▀  ▀▀▀",
+}
+
+// bannerLetterSpans give the rune start/end (exclusive) of each PANDO
+// letter within a logo row, so we can render each letter in its own color.
+var bannerLetterSpans = [5][2]int{
+	{0, 3},   // P
+	{4, 7},   // A
+	{8, 12},  // N (4 runes wide)
+	{13, 16}, // D
+	{17, 20}, // O
+}
+
+const (
+	bannerLogoWidth = 20
+	bannerLeadSlash = 4
+	bannerMinWidth  = 48 // below this, collapse to the single-line meta row
+	bannerMinHeight = 20 // below this, give message history the real estate
+)
+
+func colorizeLogoRow(row string) string {
+	runes := []rune(row)
+	if len(runes) < bannerLogoWidth {
+		return style.StatusInfo.Bold(true).Render(row)
+	}
+	var b strings.Builder
+	for i, span := range bannerLetterSpans {
+		if i > 0 {
+			b.WriteRune(' ')
+		}
+		letterStyle := lipgloss.NewStyle().Foreground(style.BannerLetters[i]).Bold(true)
+		b.WriteString(letterStyle.Render(string(runes[span[0]:span[1]])))
+	}
+	return b.String()
+}
+
+// headerRows reports how many terminal rows the header occupies given the
+// current window size. The chat view uses this to size its message area.
+func headerRows(width, height int) int {
+	if width < bannerMinWidth || height < bannerMinHeight {
+		return 1
+	}
+	return 4
+}
+
+// renderHeader is the branded top strip. On a roomy terminal it renders a
+// three-row PANDO block with slash decoration, then a meta line beneath it
+// (identity, peer, connection pill, fingerprint). On narrow or short
+// terminals it collapses to a single utilitarian row.
+//
+// All ephemeral feedback continues to live in the chat toast slot, not here.
 func (a *App) renderHeader() string {
-	brand := style.Bold.Render("pando")
+	if a.width < bannerMinWidth || a.height < bannerMinHeight {
+		return a.renderMetaLine()
+	}
+	lead := style.Faint.Render(strings.Repeat("╱", bannerLeadSlash))
+	trailWidth := max(0, a.width-bannerLeadSlash-1-bannerLogoWidth-1)
+	trail := style.Faint.Render(strings.Repeat("╱", trailWidth))
+	rows := make([]string, 0, 4)
+	for _, line := range bannerLogo {
+		rows = append(rows, lead+" "+colorizeLogoRow(line)+" "+trail)
+	}
+	meta := a.renderMetaLine()
+	if meta != "" {
+		rows = append(rows, strings.Repeat(" ", bannerLeadSlash+1)+meta)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// renderMetaLine is the single-row status strip: identity, peer arrow +
+// name (accent-colored), connection pill, and short fingerprint + verify
+// mark. Clipped to terminal width so the pill never wraps.
+func (a *App) renderMetaLine() string {
 	identity := style.Muted.Render(a.chat.Mailbox())
 
 	peerSeg := ""
@@ -78,13 +151,11 @@ func (a *App) renderHeader() string {
 		fpSeg = style.Muted.Render(style.FormatFingerprintShort(fp)) + " " + markStyle.Render(mark)
 	}
 
-	segs := []string{brand + "  " + identity + peerSeg, pill}
+	segs := []string{identity + peerSeg, pill}
 	if fpSeg != "" {
 		segs = append(segs, fpSeg)
 	}
 	row := strings.Join(segs, "    ")
-	// Clip to terminal width so the pill doesn't wrap awkwardly on narrow
-	// terminals.
 	return lipgloss.NewStyle().MaxWidth(a.width).Render(row)
 }
 
