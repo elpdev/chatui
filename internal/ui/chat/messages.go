@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/ui/media"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -92,20 +93,20 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 		m.pushToast(fmt.Sprintf("new message in %s", messaging.DefaultRoomLabel()), ToastInfo)
 		return
 	}
-	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp); err != nil {
+	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp, result.Attachment); err != nil {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return
 	}
 	if result.PeerAccountID == m.peer.mailbox {
 		m.clearPeerTyping()
 		m.appendMessageItem(messageItem{
-			kind:         transcriptMessage,
-			direction:    "inbound",
-			sender:       envelope.SenderMailbox,
-			body:         result.Body,
-			timestamp:    envelope.Timestamp,
-			messageID:    result.MessageID,
-			isAttachment: attachmentBodyPattern(result.Body),
+			kind:       transcriptMessage,
+			direction:  "inbound",
+			sender:     envelope.SenderMailbox,
+			body:       result.Body,
+			timestamp:  envelope.Timestamp,
+			messageID:  result.MessageID,
+			attachment: result.Attachment,
 		})
 		m.syncViewport()
 		return
@@ -197,7 +198,8 @@ func (m *Model) renderMessages() {
 	var prevSender string
 	var prevTS time.Time
 	var prevDay string
-	for i, item := range m.msgs.items {
+	for i := range m.msgs.items {
+		item := &m.msgs.items[i]
 		day := item.timestamp.Local().Format("2006-01-02")
 		if !item.timestamp.IsZero() && day != prevDay {
 			if len(m.msgs.rendered) > 0 {
@@ -207,7 +209,7 @@ func (m *Model) renderMessages() {
 			prevDay = day
 		}
 		if item.kind == transcriptEvent {
-			m.msgs.rendered = append(m.msgs.rendered, m.renderEventBody(item))
+			m.msgs.rendered = append(m.msgs.rendered, m.renderEventBody(*item))
 			prevSender = ""
 			prevTS = time.Time{}
 			continue
@@ -217,7 +219,7 @@ func (m *Model) renderMessages() {
 			if i > 0 {
 				m.msgs.rendered = append(m.msgs.rendered, "")
 			}
-			m.msgs.rendered = append(m.msgs.rendered, m.renderGroupHeader(item))
+			m.msgs.rendered = append(m.msgs.rendered, m.renderGroupHeader(*item))
 		}
 		m.msgs.rendered = append(m.msgs.rendered, m.renderMessageBody(item))
 		prevSender = item.sender
@@ -267,12 +269,15 @@ func (m *Model) renderGroupHeader(item messageItem) string {
 	return nameStyled + suffix
 }
 
-func (m *Model) renderMessageBody(item messageItem) string {
+func (m *Model) renderMessageBody(item *messageItem) string {
 	bodyStyle := lipgloss.NewStyle()
-	if item.isAttachment {
+	if item.attachment != nil {
 		bodyStyle = style.Italic
 	}
 	body := "  " + bodyStyle.Render(item.body)
+	if preview := m.renderAttachmentPreview(item); preview != "" {
+		body = preview + "\n" + body
+	}
 
 	if item.direction != "outbound" {
 		return body
@@ -280,6 +285,9 @@ func (m *Model) renderMessageBody(item messageItem) string {
 	glyph, glyphStyle := deliveryGlyphFor(item.status)
 	if glyph == "" {
 		return body
+	}
+	if strings.Contains(body, "\n") {
+		return body + "\n  " + glyphStyle.Render(glyph)
 	}
 	tick := " " + glyphStyle.Render(glyph)
 	width := m.viewport.Width
@@ -291,6 +299,37 @@ func (m *Model) renderMessageBody(item messageItem) string {
 		pad = 1
 	}
 	return body + strings.Repeat(" ", pad) + tick
+}
+
+func (m *Model) renderAttachmentPreview(item *messageItem) string {
+	if !isPhotoAttachment(item.attachment) || m.viewport.Width <= 0 {
+		return ""
+	}
+	imageWidth := min(max(12, m.viewport.Width-6), 48)
+	if item.imageRendered != "" && item.imageWidth == imageWidth {
+		return indentBlock(item.imageRendered, "  ")
+	}
+	block, _, err := media.RenderFile(item.attachment.LocalPath, imageWidth)
+	if err != nil || block == "" {
+		item.imageRendered = ""
+		item.imageWidth = imageWidth
+		return ""
+	}
+	item.imageRendered = block
+	item.imageWidth = imageWidth
+	return indentBlock(block, "  ")
+}
+
+func indentBlock(block, prefix string) string {
+	lines := strings.Split(block, "\n")
+	for i := range lines {
+		if lines[i] == "" {
+			lines[i] = prefix
+			continue
+		}
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func batchMessageID(batch *messaging.OutgoingBatch) string {
@@ -330,13 +369,4 @@ func deliveryGlyphFor(s deliveryStatus) (string, lipgloss.Style) {
 		return style.GlyphDeliveryFailed, style.DeliveryFailed
 	}
 	return "", lipgloss.NewStyle()
-}
-
-func attachmentBodyPattern(body string) bool {
-	for _, prefix := range []string{"photo sent:", "voice note sent:", "file sent:"} {
-		if strings.HasPrefix(body, prefix) {
-			return true
-		}
-	}
-	return false
 }

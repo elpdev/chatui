@@ -31,6 +31,44 @@ func TestEncryptedHistoryRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncryptedHistoryRoundTripPreservesAttachmentMetadata(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	record := MessageRecord{
+		PeerMailbox: "bob",
+		Direction:   "inbound",
+		Body:        "photo received: photo.png saved to /tmp/photo.png",
+		Attachment: &AttachmentRecord{
+			Type:      "photo",
+			Filename:  "photo.png",
+			MIMEType:  "image/png",
+			LocalPath: "/tmp/photo.png",
+			Size:      1234,
+		},
+		Timestamp: time.Now().UTC().Round(time.Second),
+	}
+	if err := clientStore.AppendHistory(id, record); err != nil {
+		t.Fatalf("append history: %v", err)
+	}
+
+	records, err := clientStore.LoadHistory(id, "bob")
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one record, got %d", len(records))
+	}
+	if records[0].Attachment == nil {
+		t.Fatal("expected attachment metadata to round-trip")
+	}
+	if records[0].Attachment.Filename != "photo.png" || records[0].Attachment.LocalPath != "/tmp/photo.png" {
+		t.Fatalf("unexpected attachment metadata: %+v", records[0].Attachment)
+	}
+}
+
 func TestAppendHistoryRejectsPathTraversalMailbox(t *testing.T) {
 	clientStore := NewClientStore(t.TempDir())
 	id, err := identity.New("alice")

@@ -26,6 +26,7 @@ type IncomingResult struct {
 	// Body and AckEnvelopes are set for chat messages. Control messages may set
 	// ContactUpdated, MessageID, or TypingState instead.
 	Body         string
+	Attachment   *store.AttachmentRecord
 	AckEnvelopes []protocol.Envelope
 
 	// MessageID is used by chat messages and delivery acknowledgements.
@@ -54,8 +55,9 @@ const (
 )
 
 type OutgoingBatch struct {
-	MessageID string
-	Envelopes []protocol.Envelope
+	MessageID  string
+	Envelopes  []protocol.Envelope
+	Attachment *store.AttachmentRecord
 }
 
 type RoomSyncUpdate struct {
@@ -122,21 +124,23 @@ func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
 	return s.store.LoadHistory(s.identity, peerMailbox)
 }
 
-func (s *Service) SaveSent(peerMailbox, messageID, body string) error {
+func (s *Service) SaveSent(peerMailbox, messageID, body string, attachment *store.AttachmentRecord) error {
 	return s.store.AppendHistory(s.identity, store.MessageRecord{
 		MessageID:   messageID,
 		PeerMailbox: peerMailbox,
 		Direction:   "outbound",
 		Body:        body,
+		Attachment:  attachment,
 		Timestamp:   time.Now().UTC(),
 	})
 }
 
-func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time) error {
+func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time, attachment *store.AttachmentRecord) error {
 	return s.store.AppendHistory(s.identity, store.MessageRecord{
 		PeerMailbox: peerMailbox,
 		Direction:   "inbound",
 		Body:        body,
+		Attachment:  attachment,
 		Timestamp:   timestamp,
 	})
 }

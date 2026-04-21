@@ -207,7 +207,7 @@ func TestDeliveryAckMarksSentHistoryDelivered(t *testing.T) {
 	if batch == nil || batch.MessageID == "" {
 		t.Fatalf("expected outgoing batch message id")
 	}
-	if err := aliceService.SaveSent("bob", batch.MessageID, "needs ack"); err != nil {
+	if err := aliceService.SaveSent("bob", batch.MessageID, "needs ack", nil); err != nil {
 		t.Fatalf("save sent: %v", err)
 	}
 	chatEnvelope := batch.Envelopes[len(batch.Envelopes)-1]
@@ -609,6 +609,9 @@ func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	if !strings.Contains(finalResult.Body, "photo received: photo.png saved to ") {
 		t.Fatalf("unexpected final body: %q", finalResult.Body)
 	}
+	if finalResult.Attachment == nil || finalResult.Attachment.Type != AttachmentTypePhoto {
+		t.Fatalf("expected photo attachment metadata, got %+v", finalResult.Attachment)
+	}
 	attachmentPaths, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*"))
 	if err != nil {
 		t.Fatalf("glob attachments: %v", err)
@@ -861,6 +864,9 @@ func TestVoiceChunkRoundTripStoresAttachment(t *testing.T) {
 	if !strings.Contains(finalResult.Body, "voice note received: clip.wav saved to ") {
 		t.Fatalf("unexpected final body: %q", finalResult.Body)
 	}
+	if finalResult.Attachment == nil || finalResult.Attachment.Type != AttachmentTypeVoice {
+		t.Fatalf("expected voice attachment metadata, got %+v", finalResult.Attachment)
+	}
 	attachmentPaths, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*"))
 	if err != nil {
 		t.Fatalf("glob attachments: %v", err)
@@ -977,6 +983,9 @@ func TestFileChunkRoundTripStoresAttachment(t *testing.T) {
 	}
 	if !strings.Contains(finalResult.Body, "file received: notes.txt saved to ") {
 		t.Fatalf("unexpected final body: %q", finalResult.Body)
+	}
+	if finalResult.Attachment == nil || finalResult.Attachment.Type != AttachmentTypeFile {
+		t.Fatalf("expected file attachment metadata, got %+v", finalResult.Attachment)
 	}
 	attachmentPaths, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*"))
 	if err != nil {

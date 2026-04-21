@@ -276,7 +276,7 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if err := m.messaging.SaveSent(msg.recipient, msg.messageID, msg.body); err != nil {
+	if err := m.messaging.SaveSent(msg.recipient, msg.messageID, msg.body, msg.attachment); err != nil {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return m, nil
 	}

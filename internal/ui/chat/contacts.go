@@ -174,13 +174,17 @@ func (m *Model) loadHistory() {
 		return
 	}
 	for _, record := range records {
+		attachment := record.Attachment
+		if attachment == nil {
+			attachment = legacyAttachmentRecord(record.Body)
+		}
 		item := messageItem{
-			kind:         transcriptMessage,
-			direction:    record.Direction,
-			body:         record.Body,
-			timestamp:    record.Timestamp,
-			messageID:    record.MessageID,
-			isAttachment: attachmentBodyPattern(record.Body),
+			kind:       transcriptMessage,
+			direction:  record.Direction,
+			body:       record.Body,
+			timestamp:  record.Timestamp,
+			messageID:  record.MessageID,
+			attachment: attachment,
 		}
 		if record.Direction == "outbound" {
 			item.sender = m.mailbox

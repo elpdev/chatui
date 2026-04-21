@@ -130,17 +130,21 @@ func (s *Service) handleTyping(contact *identity.Contact, payload *contentPayloa
 }
 
 func (s *Service) handleAttachmentChunk(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
-	message, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
+	attachment, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
 	if err != nil {
 		return nil, err
 	}
 	if !done {
 		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID}, nil
 	}
-	return &IncomingResult{PeerAccountID: contact.AccountID, Body: message}, nil
+	return &IncomingResult{
+		PeerAccountID: contact.AccountID,
+		Body:          AttachmentReceivedBody(attachment.Type, attachment.Filename, attachment.LocalPath),
+		Attachment:    attachment,
+	}, nil
 }
 
-func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *attachmentChunkPayload) (string, bool, error) {
+func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *attachmentChunkPayload) (*store.AttachmentRecord, bool, error) {
 	return s.incomingAttachments.handleChunk(peerAccountID, chunk)
 }
 
