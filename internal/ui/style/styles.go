@@ -1,9 +1,10 @@
 // Package style holds the visual tokens for the Pando TUI.
 //
-// All color literals live here. Downstream rendering code must consume named
-// tokens (Muted, StatusOk, VerifiedOk, ...) rather than picking raw
-// lipgloss.Color values. This keeps the palette consistent across screens and
-// makes a future theme swap possible without touching rendering code.
+// All exported Style values below are populated by Apply (see theme.go) at
+// package init and on every subsequent theme swap. Downstream rendering
+// code consumes these named tokens (Muted, StatusOk, Modal, ...) rather
+// than picking raw lipgloss.Color values, so a palette change never has
+// to touch rendering code.
 package style
 
 import (
@@ -13,52 +14,27 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Palette — single source of truth for raw 256-color values.
-// Keep this list short; add tokens below rather than inventing new colors
-// inline.
-// ----------------------------------------------------------------------------
-
-var (
-	colorMuted     = lipgloss.Color("241") // secondary text, hint lines
-	colorSubtle    = lipgloss.Color("243") // tertiary text, meta
-	colorDim       = lipgloss.Color("248") // modal body text
-	colorBright    = lipgloss.Color("230") // modal titles
-	colorFaint     = lipgloss.Color("240") // dim borders
-	colorBgSel     = lipgloss.Color("238") // selection background, active-row highlight
-	colorBgModal   = lipgloss.Color("234") // subtle modal inset + backdrop vignette
-	colorDivider   = lipgloss.Color("60")  // sidebar divider accent
-	colorBgPalette = lipgloss.Color("236") // command palette selected row
-
-	colorOk   = lipgloss.Color("86")  // green / connected / verified / delivered
-	colorWarn = lipgloss.Color("214") // amber / reconnecting / unverified
-	colorBad  = lipgloss.Color("203") // red / failed / auth-failed
-	colorInfo = lipgloss.Color("69")  // blue / input accent, unread badge
-
-	colorPhosphor = lipgloss.Color("#9FE8B0") // CRT phosphor green / banner letters
-	colorAmber    = lipgloss.Color("#FFB347") // warm amber / banner slashes
-)
-
-// ----------------------------------------------------------------------------
 // Foreground / emphasis tokens.
 // ----------------------------------------------------------------------------
 
 var (
 	// Muted is secondary copy: hints, timestamps, fingerprints.
-	Muted = lipgloss.NewStyle().Foreground(colorMuted)
+	Muted lipgloss.Style
 	// Subtle is tertiary copy: meta counters, footnotes.
-	Subtle = lipgloss.NewStyle().Foreground(colorSubtle)
+	Subtle lipgloss.Style
 	// Dim is body copy inside a darker container (modals).
-	Dim = lipgloss.NewStyle().Foreground(colorDim)
+	Dim lipgloss.Style
 	// Bright is the highest-contrast foreground for headings inside modals.
-	Bright = lipgloss.NewStyle().Foreground(colorBright)
+	Bright lipgloss.Style
 	// Faint is barely-visible text for thin dividers and placeholder borders.
-	Faint = lipgloss.NewStyle().Foreground(colorFaint)
+	Faint lipgloss.Style
 
+	// Bold and Italic are orthogonal to color and never change with the theme.
 	Bold   = lipgloss.NewStyle().Bold(true)
 	Italic = lipgloss.NewStyle().Italic(true)
 
 	// ModalTitle is the bold bright heading at the top of every modal.
-	ModalTitle = Bright.Bold(true)
+	ModalTitle lipgloss.Style
 )
 
 // ----------------------------------------------------------------------------
@@ -66,10 +42,10 @@ var (
 // ----------------------------------------------------------------------------
 
 var (
-	StatusOk   = lipgloss.NewStyle().Foreground(colorOk)
-	StatusWarn = lipgloss.NewStyle().Foreground(colorWarn)
-	StatusBad  = lipgloss.NewStyle().Foreground(colorBad)
-	StatusInfo = lipgloss.NewStyle().Foreground(colorInfo)
+	StatusOk   lipgloss.Style
+	StatusWarn lipgloss.Style
+	StatusBad  lipgloss.Style
+	StatusInfo lipgloss.Style
 )
 
 // ----------------------------------------------------------------------------
@@ -78,18 +54,18 @@ var (
 // ----------------------------------------------------------------------------
 
 var (
-	VerifiedOk     = StatusOk
-	UnverifiedWarn = StatusWarn
+	VerifiedOk     lipgloss.Style
+	UnverifiedWarn lipgloss.Style
 
-	DeliveryPending   = Muted
-	DeliverySent      = Muted
-	DeliveryDelivered = StatusOk
-	DeliveryFailed    = StatusBad
+	DeliveryPending   lipgloss.Style
+	DeliverySent      lipgloss.Style
+	DeliveryDelivered lipgloss.Style
+	DeliveryFailed    lipgloss.Style
 
-	UnreadBadge = StatusInfo.Bold(true)
+	UnreadBadge lipgloss.Style
 
 	// CursorBlock styles the blinking block cursor in the add-contact editor.
-	CursorBlock = StatusInfo
+	CursorBlock lipgloss.Style
 )
 
 // ----------------------------------------------------------------------------
@@ -97,69 +73,48 @@ var (
 // ----------------------------------------------------------------------------
 
 var (
-	Selected = lipgloss.NewStyle().Background(colorBgSel)
-	BgModal  = lipgloss.NewStyle().Background(colorBgModal)
-
-	// ActiveRow highlights the currently open chat row in the sidebar.
-	ActiveRow = lipgloss.NewStyle().Background(colorBgSel).Bold(true)
+	Selected  lipgloss.Style
+	BgModal   lipgloss.Style
+	ActiveRow lipgloss.Style
 
 	// BackdropTint is the raw color used to tint whitespace around modals via
 	// lipgloss.WithWhitespaceBackground.
-	BackdropTint = colorBgModal
+	BackdropTint lipgloss.Color
 
 	// RoomAccent is the signature color for encrypted rooms (fingerprint-less).
-	RoomAccent = colorInfo
+	RoomAccent lipgloss.Color
 
-	SidebarBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
-			BorderForeground(colorDivider)
+	SidebarBorder        lipgloss.Style
+	SidebarBorderFocused lipgloss.Style
 
-	SidebarBorderFocused = lipgloss.NewStyle().
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
-				BorderForeground(colorInfo)
+	ModalBorder lipgloss.Style
+	Modal       lipgloss.Style
 
-	ModalBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderForeground(colorInfo)
+	PaletteModal        lipgloss.Style
+	PaletteInput        lipgloss.Style
+	PaletteItem         lipgloss.Style
+	PaletteSelectedItem lipgloss.Style
 
-	// Modal combines the modal border and background. Downstream code should
-	// use this rather than composing them inline.
-	Modal = lipgloss.NewStyle().
-		BorderStyle(lipgloss.ThickBorder()).
-		BorderForeground(colorInfo).
-		Background(colorBgModal)
+	InputBorder lipgloss.Style
+	InputFrame  = lipgloss.NewStyle()
 
-	PaletteModal = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(colorFaint).
-			Background(colorBgModal)
+	PaletteTitle    lipgloss.Style
+	PaletteMeta     lipgloss.Style
+	PaletteFooter   lipgloss.Style
+	PaletteShortcut lipgloss.Style
+	PaletteAccent   lipgloss.Style
+	PaletteMatch    lipgloss.Style
+)
 
-	PaletteInput = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorFaint)
+// ----------------------------------------------------------------------------
+// Banner — welcome-screen PANDO wordmark.
+// ----------------------------------------------------------------------------
 
-	PaletteItem = lipgloss.NewStyle().
-			Padding(0, 1)
-
-	PaletteSelectedItem = lipgloss.NewStyle().
-				Background(colorBgPalette).
-				Foreground(colorBright).
-				Padding(0, 1)
-
-	InputBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorFaint)
-
-	InputFrame = lipgloss.NewStyle()
-
-	PaletteTitle    = Bright.Bold(true)
-	PaletteMeta     = Muted
-	PaletteFooter   = Subtle
-	PaletteShortcut = Subtle
-	PaletteAccent   = StatusInfo
-	PaletteMatch    = Bright.Underline(true)
+var (
+	// BannerText renders the PANDO wordmark rows in the welcome-screen banner.
+	BannerText lipgloss.Style
+	// BannerSlash renders the diagonal-slash decoration bracketing the wordmark.
+	BannerSlash lipgloss.Style
 )
 
 // ----------------------------------------------------------------------------
@@ -192,40 +147,23 @@ const (
 
 // ----------------------------------------------------------------------------
 // Peer accent palette — a stable, small set of colors assigned per-fingerprint
-// so the same peer always renders in the same color.
+// so the same peer always renders in the same color. Sourced from the active
+// theme; the selection is stable across runs because it's hashed, not random.
 // ----------------------------------------------------------------------------
 
-var peerAccentPalette = []lipgloss.Color{
-	lipgloss.Color("75"),  // sky blue
-	lipgloss.Color("141"), // lilac
-	lipgloss.Color("215"), // peach
-	lipgloss.Color("120"), // mint
-	lipgloss.Color("209"), // coral
-	lipgloss.Color("180"), // sand
-	lipgloss.Color("117"), // ice
-	lipgloss.Color("177"), // orchid
-}
-
-// BannerText renders the PANDO wordmark rows in the welcome-screen banner.
-// CRT phosphor green, bold.
-var BannerText = lipgloss.NewStyle().Foreground(colorPhosphor).Bold(true)
-
-// BannerSlash renders the diagonal-slash decoration bracketing the wordmark.
-// Warm amber, reads as a signature-terminal accent beside the phosphor letters.
-var BannerSlash = lipgloss.NewStyle().Foreground(colorAmber)
-
 // PeerAccent returns a stable color for the given fingerprint. An empty
-// fingerprint falls back to the ok (green) token.
+// fingerprint falls back to the active theme's ok (success) color.
 func PeerAccent(fingerprint string) lipgloss.Color {
 	if fingerprint == "" {
-		return colorOk
+		return active.Ok
 	}
 	// Polynomial rolling hash — stable across runs, no crypto dependency.
 	var n uint32
 	for _, r := range fingerprint {
 		n = n*131 + uint32(r)
 	}
-	return peerAccentPalette[int(n)%len(peerAccentPalette)]
+	palette := active.PeerAccents
+	return palette[int(n)%len(palette)]
 }
 
 // PeerAccentStyle is PeerAccent wrapped in a lipgloss.Style for direct
