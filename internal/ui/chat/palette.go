@@ -57,20 +57,26 @@ func renderPaletteListItemMatched(width int, selected bool, title, detail, meta 
 		titleText = renderPaletteMatches(title, matched, selected)
 	}
 
-	titleWidth := contentWidth - metaWidth
+	marker := "  "
+	if selected {
+		marker = style.PaletteAccent.Render(style.GlyphPrompt) + " "
+	}
+	const markerWidth = 2
+	innerWidth := max(1, contentWidth-markerWidth)
+	titleWidth := innerWidth - metaWidth
 	if meta != "" {
 		titleWidth--
 	}
 	if titleWidth < 1 {
 		titleWidth = 1
 	}
-	header := lipgloss.NewStyle().Width(titleWidth).MaxWidth(titleWidth).Render(titleText)
+	header := marker + lipgloss.NewStyle().Width(titleWidth).MaxWidth(titleWidth).Render(titleText)
 	if meta != "" {
 		header += " " + lipgloss.NewStyle().Width(metaWidth).Align(lipgloss.Right).Render(metaStyle.Render(meta))
 	}
 	lines := []string{header}
 	if detail != "" {
-		lines = append(lines, detailStyle.Width(contentWidth).MaxWidth(contentWidth).Render(detail))
+		lines = append(lines, "  "+detailStyle.Width(innerWidth).MaxWidth(innerWidth).Render(detail))
 	}
 	return rowStyle.Render(strings.Join(lines, "\n"))
 }

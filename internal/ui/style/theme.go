@@ -22,7 +22,7 @@ type Theme struct {
 	Faint, Muted, Subtle, Dim, Bright lipgloss.Color
 
 	// Surface backgrounds and chrome.
-	BgSel, BgModal, BgPalette, Divider lipgloss.Color
+	BgSel, BgModal, Divider lipgloss.Color
 
 	// Status semantics.
 	Ok, Warn, Bad, Info lipgloss.Color
@@ -159,7 +159,6 @@ func Apply(t Theme) {
 	PaletteItem = lipgloss.NewStyle().Padding(0, 1)
 
 	PaletteSelectedItem = lipgloss.NewStyle().
-		Background(t.BgPalette).
 		Foreground(t.Bright).
 		Bold(true).
 		Padding(0, 1)
@@ -194,10 +193,9 @@ func classicTheme() Theme {
 		Dim:    lipgloss.Color("248"),
 		Bright: lipgloss.Color("230"),
 
-		BgSel:     lipgloss.Color("238"),
-		BgModal:   lipgloss.Color("234"),
-		BgPalette: lipgloss.Color("61"),
-		Divider:   lipgloss.Color("60"),
+		BgSel:   lipgloss.Color("238"),
+		BgModal: lipgloss.Color("234"),
+		Divider: lipgloss.Color("60"),
 
 		Ok:   lipgloss.Color("86"),
 		Warn: lipgloss.Color("214"),
@@ -237,10 +235,9 @@ func phosphorTheme() Theme {
 		Dim:    lipgloss.Color("#8FBDA0"), // lighter mid-phosphor, synthesized
 		Bright: lipgloss.Color("#9FE8B0"), // phosphor
 
-		BgSel:     lipgloss.Color("#18233D"), // bg-3
-		BgModal:   lipgloss.Color("#111A2C"), // bg-2
-		BgPalette: lipgloss.Color("#18233D"), // bg-3
-		Divider:   lipgloss.Color("#2A3752"), // hairline
+		BgSel:   lipgloss.Color("#18233D"), // bg-3
+		BgModal: lipgloss.Color("#111A2C"), // bg-2
+		Divider: lipgloss.Color("#2A3752"), // hairline
 
 		Ok:   lipgloss.Color("#4FAE7A"), // moss
 		Warn: lipgloss.Color("#FFB347"), // amber
@@ -279,10 +276,9 @@ func miamiTheme() Theme {
 		Dim:    lipgloss.Color("#D4B8E8"), // soft pink-lavender
 		Bright: lipgloss.Color("#F0E6FF"), // near-white with violet cast
 
-		BgSel:     lipgloss.Color("#2A1448"), // indigo selection
-		BgModal:   lipgloss.Color("#1A0B2E"), // deep twilight
-		BgPalette: lipgloss.Color("#2A1448"), // matches BgSel
-		Divider:   lipgloss.Color("#3D2164"), // muted purple hairline
+		BgSel:   lipgloss.Color("#2A1448"), // indigo selection
+		BgModal: lipgloss.Color("#1A0B2E"), // deep twilight
+		Divider: lipgloss.Color("#3D2164"), // muted purple hairline
 
 		Ok:   lipgloss.Color("#00F5A0"), // neon mint
 		Warn: lipgloss.Color("#FF8C42"), // sunset orange
