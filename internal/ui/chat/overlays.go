@@ -20,6 +20,11 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	}
+	if m.addRelay.open {
+		if handled, cmd := m.addRelay.Update(msg); handled {
+			return true, cmd
+		}
+	}
 
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -116,6 +121,14 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return nil
 	case commandPaletteCommandThemes:
 		return m.applyPaletteTheme(action.themeName)
+	case commandPaletteCommandRelays, commandPaletteCommandSwitchRelay:
+		return m.switchRelay(action.relayName)
+	case commandPaletteCommandAddRelay:
+		return m.openAddRelayModal()
+	case commandPaletteCommandRemoveRelay:
+		return m.removeRelayProfile(action.relayName)
+	case commandPaletteCommandEditRelay:
+		return m.openEditRelayModal(action.relayName)
 	case commandPaletteCommandMessageTTL:
 		return m.applyPaletteMessageTTL(action.messageTTL)
 	default:

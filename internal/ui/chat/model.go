@@ -9,9 +9,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/transport"
+	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -39,6 +41,7 @@ type Model struct {
 	filePicker           filePickerModel
 	commandPalette       commandPaletteModel
 	addContact           addContactModal
+	addRelay             addRelayModal
 	contactRequests      contactRequestsModal
 	pendingRequestsCount int
 	helpOpen             bool
@@ -73,14 +76,27 @@ func New(deps Deps) *Model {
 	if factory == nil {
 		factory = defaultRelayClientFactory
 	}
+	transportFactory := deps.RelayTransportFactory
+	if transportFactory == nil {
+		identity := deps.Messaging.Identity()
+		transportFactory = func(url, token string) transport.Client {
+			return ws.NewClient(url, token, identity)
+		}
+	}
+	profiles := append([]config.RelayProfile(nil), deps.RelayProfiles...)
+	active := relayProfileName(profiles, deps.RelayURL, deps.RelayToken)
 	m := &Model{
 		client:    deps.Client,
 		messaging: deps.Messaging,
 		mailbox:   deps.Mailbox,
 		relay: relayState{
-			url:           deps.RelayURL,
-			token:         deps.RelayToken,
-			clientFactory: factory,
+			url:              deps.RelayURL,
+			token:            deps.RelayToken,
+			active:           active,
+			profiles:         profiles,
+			clientFactory:    factory,
+			transportFactory: transportFactory,
+			saveProfiles:     deps.SaveRelays,
 		},
 		peer: peerState{mailbox: deps.RecipientMailbox},
 		conn: connectionState{
@@ -93,27 +109,34 @@ func New(deps Deps) *Model {
 		viewport:      vp,
 		selectedIndex: -1,
 		filePicker:    newFilePickerModel(),
-		commandPalette: newCommandPaletteModel(commandPaletteDeps{
-			applyTheme: style.Apply,
-			currentTheme: func() string {
-				return style.Current().Name
-			},
-			saveTheme: deps.SaveTheme,
-			currentMessageTTL: func() time.Duration {
-				if deps.Messaging == nil {
-					return 0
-				}
-				return deps.Messaging.MessageTTL()
-			},
-			saveMessageTTL: deps.SaveMessageTTL,
-		}),
-		unread: map[string]int{},
+		unread:        map[string]int{},
 	}
+	m.commandPalette = newCommandPaletteModel(commandPaletteDeps{
+		applyTheme: style.Apply,
+		currentTheme: func() string {
+			return style.Current().Name
+		},
+		saveTheme: deps.SaveTheme,
+		currentMessageTTL: func() time.Duration {
+			if deps.Messaging == nil {
+				return 0
+			}
+			return deps.Messaging.MessageTTL()
+		},
+		saveMessageTTL: deps.SaveMessageTTL,
+		currentRelayName: func() string {
+			return m.relay.active
+		},
+		relayProfiles: func() []config.RelayProfile {
+			return append([]config.RelayProfile(nil), m.relay.profiles...)
+		},
+	})
 	m.addContact = newAddContactModal(addContactDeps{
 		messaging:         deps.Messaging,
 		ensureRelayClient: m.ensureRelayClient,
 		relayConfigured:   m.relayConfigured,
 	})
+	m.addRelay = newAddRelayModal()
 	m.contactRequests = newContactRequestsModal(contactRequestsDeps{
 		decide: m.makeContactRequestDecision,
 	})
@@ -131,6 +154,15 @@ func New(deps Deps) *Model {
 
 func defaultRelayClientFactory(url, token string) (RelayClient, error) {
 	return relayapi.NewClient(url, token)
+}
+
+func relayProfileName(profiles []config.RelayProfile, url, token string) string {
+	for _, relay := range profiles {
+		if relay.URL == url && relay.Token == token {
+			return relay.Name
+		}
+	}
+	return ""
 }
 
 // ensureRelayClient builds the relay client on demand. Returns an error if no
@@ -179,6 +211,12 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:
 		return m.handleAddContactClosedMsg(msg)
+	case addRelaySavedMsg:
+		return m.handleAddRelaySavedMsg(msg)
+	case addRelayClosedMsg:
+		return m.handleAddRelayClosedMsg(msg)
+	case editRelaySavedMsg:
+		return m.handleEditRelaySavedMsg(msg)
 	case contactRequestsClosedMsg:
 		return m.handleContactRequestsClosedMsg(msg)
 	case contactRequestDecisionResultMsg:
@@ -197,9 +235,9 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	case clientEventMsg:
 		return m.handleClientEventMsg(msg)
 	case connectResultMsg:
-		return m.handleConnectResultMsg(msg.err)
+		return m.handleConnectResultMsg(msg.client, msg.err)
 	case reconnectResultMsg:
-		return m.handleConnectResultMsg(msg.err)
+		return m.handleConnectResultMsg(msg.client, msg.err)
 	case typingTickMsg:
 		return m.handleTypingTickMsg(msg)
 	case sendResultMsg:

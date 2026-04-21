@@ -34,11 +34,12 @@ func Execute(args []string) error {
 
 	cfg := config.DefaultClient()
 	cfg.RootDir = rootDir
-	if devCfg.RelayURL != "" {
-		cfg.RelayURL = devCfg.RelayURL
+	activeRelay := devCfg.ActiveRelayProfile()
+	if activeRelay.URL != "" {
+		cfg.RelayURL = activeRelay.URL
 	}
-	if devCfg.RelayToken != "" {
-		cfg.RelayToken = devCfg.RelayToken
+	if activeRelay.Token != "" {
+		cfg.RelayToken = activeRelay.Token
 	}
 	if devCfg.DefaultMailbox != "" {
 		cfg.Mailbox = devCfg.DefaultMailbox
@@ -89,6 +90,7 @@ func Execute(args []string) error {
 		RecipientMailbox: cfg.RecipientMailbox,
 		RelayURL:         cfg.RelayURL,
 		RelayToken:       cfg.RelayToken,
+		RelayProfiles:    devCfg.RelayProfiles(),
 		SaveTheme: func(name string) error {
 			devCfg, err := config.LoadDeviceConfig(rootDir)
 			if err != nil {
@@ -103,6 +105,14 @@ func Execute(args []string) error {
 				return err
 			}
 			devCfg.MessageTTL = ttl
+			return config.SaveDeviceConfig(rootDir, devCfg)
+		},
+		SaveRelays: func(relays []config.RelayProfile, active string) error {
+			devCfg, err := config.LoadDeviceConfig(rootDir)
+			if err != nil {
+				return err
+			}
+			devCfg.SetRelayProfiles(relays, active)
 			return config.SaveDeviceConfig(rootDir, devCfg)
 		},
 	})

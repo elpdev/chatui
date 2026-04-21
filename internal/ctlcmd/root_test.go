@@ -487,6 +487,43 @@ func TestRunConfigSetRelayTokenAndShow(t *testing.T) {
 	}
 }
 
+func TestRunConfigRelayLifecycle(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := runConfigRelayAdd([]string{"-root-dir", rootDir, "home", "ws://localhost:8080/ws"}); err != nil {
+		t.Fatalf("add home relay: %v", err)
+	}
+	if err := runConfigRelayAdd([]string{"-root-dir", rootDir, "-token", "secret-token", "prod", "wss://relay.example/ws"}); err != nil {
+		t.Fatalf("add prod relay: %v", err)
+	}
+	if err := runConfigRelayUse([]string{"-root-dir", rootDir, "prod"}); err != nil {
+		t.Fatalf("use prod relay: %v", err)
+	}
+
+	listOutput := captureStdout(t, func() {
+		if err := runConfigRelayList([]string{"-root-dir", rootDir}); err != nil {
+			t.Fatalf("list relays: %v", err)
+		}
+	})
+	if !strings.Contains(listOutput, "* prod wss://relay.example/ws [token]") {
+		t.Fatalf("expected active prod relay in list output, got %q", listOutput)
+	}
+
+	if err := runConfigRelayRemove([]string{"-root-dir", rootDir, "home"}); err != nil {
+		t.Fatalf("remove home relay: %v", err)
+	}
+	showOutput := captureStdout(t, func() {
+		if err := runConfigShow([]string{"-root-dir", rootDir}); err != nil {
+			t.Fatalf("show config: %v", err)
+		}
+	})
+	if !strings.Contains(showOutput, "active_relay: prod") {
+		t.Fatalf("expected active relay in show output, got %q", showOutput)
+	}
+	if !strings.Contains(showOutput, "- prod (active) wss://relay.example/ws [token]") {
+		t.Fatalf("expected saved prod relay in show output, got %q", showOutput)
+	}
+}
+
 func TestPublishDirectoryAndLookupContact(t *testing.T) {
 	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)

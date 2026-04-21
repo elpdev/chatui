@@ -26,6 +26,12 @@ type Client struct {
 	DataDir          string
 }
 
+type RelayProfile struct {
+	Name  string `yaml:"name,omitempty"`
+	URL   string `yaml:"url,omitempty"`
+	Token string `yaml:"token,omitempty"`
+}
+
 type Relay struct {
 	Addr               string
 	RootDir            string
@@ -183,11 +189,13 @@ func splitCommaList(value string) []string {
 
 // DeviceConfig holds optional device-wide defaults stored in config.yml.
 type DeviceConfig struct {
-	RelayURL       string        `yaml:"relay_url,omitempty"`
-	RelayToken     string        `yaml:"relay_token,omitempty"`
-	DefaultMailbox string        `yaml:"default_mailbox,omitempty"`
-	Theme          string        `yaml:"theme,omitempty"`
-	MessageTTL     time.Duration `yaml:"message_ttl,omitempty"`
+	RelayURL       string         `yaml:"relay_url,omitempty"`
+	RelayToken     string         `yaml:"relay_token,omitempty"`
+	Relays         []RelayProfile `yaml:"relays,omitempty"`
+	ActiveRelay    string         `yaml:"active_relay,omitempty"`
+	DefaultMailbox string         `yaml:"default_mailbox,omitempty"`
+	Theme          string         `yaml:"theme,omitempty"`
+	MessageTTL     time.Duration  `yaml:"message_ttl,omitempty"`
 }
 
 const (
@@ -208,6 +216,104 @@ func (c DeviceConfig) EffectiveMessageTTL() time.Duration {
 	return c.MessageTTL
 }
 
+func (c DeviceConfig) RelayProfiles() []RelayProfile {
+	profiles := make([]RelayProfile, 0, len(c.Relays)+1)
+	seen := map[string]struct{}{}
+	for _, relay := range c.Relays {
+		normalized, ok := normalizeRelayProfile(relay)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[normalized.Name]; exists {
+			continue
+		}
+		seen[normalized.Name] = struct{}{}
+		profiles = append(profiles, normalized)
+	}
+	if len(profiles) == 0 {
+		if legacy, ok := normalizeRelayProfile(RelayProfile{Name: defaultRelayProfileName(c.RelayURL), URL: c.RelayURL, Token: c.RelayToken}); ok {
+			profiles = append(profiles, legacy)
+		}
+	}
+	return profiles
+}
+
+func (c DeviceConfig) ActiveRelayProfile() RelayProfile {
+	profiles := c.RelayProfiles()
+	if len(profiles) == 0 {
+		return RelayProfile{Name: defaultRelayProfileName(DefaultRelayURL), URL: DefaultRelayURL}
+	}
+	active := strings.TrimSpace(c.ActiveRelay)
+	if active != "" {
+		for _, relay := range profiles {
+			if relay.Name == active {
+				return relay
+			}
+		}
+	}
+	return profiles[0]
+}
+
+func (c *DeviceConfig) SetRelayProfiles(relays []RelayProfile, active string) {
+	normalized := make([]RelayProfile, 0, len(relays))
+	seen := map[string]struct{}{}
+	for _, relay := range relays {
+		clean, ok := normalizeRelayProfile(relay)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[clean.Name]; exists {
+			continue
+		}
+		seen[clean.Name] = struct{}{}
+		normalized = append(normalized, clean)
+	}
+	c.Relays = normalized
+	if len(normalized) == 0 {
+		c.ActiveRelay = ""
+		c.RelayURL = ""
+		c.RelayToken = ""
+		return
+	}
+	selected := strings.TrimSpace(active)
+	if selected == "" {
+		selected = normalized[0].Name
+	}
+	for _, relay := range normalized {
+		if relay.Name == selected {
+			c.ActiveRelay = relay.Name
+			c.RelayURL = relay.URL
+			c.RelayToken = relay.Token
+			return
+		}
+	}
+	c.ActiveRelay = normalized[0].Name
+	c.RelayURL = normalized[0].URL
+	c.RelayToken = normalized[0].Token
+}
+
+func normalizeRelayProfile(relay RelayProfile) (RelayProfile, bool) {
+	relay.Name = strings.TrimSpace(relay.Name)
+	relay.URL = strings.TrimSpace(relay.URL)
+	if relay.Name == "" {
+		relay.Name = defaultRelayProfileName(relay.URL)
+	}
+	if relay.Name == "" || relay.URL == "" {
+		return RelayProfile{}, false
+	}
+	return relay, true
+}
+
+func defaultRelayProfileName(url string) string {
+	if strings.TrimSpace(url) == "" {
+		return "default"
+	}
+	if url == DefaultRelayURL {
+		return "default"
+	}
+	return "primary"
+}
+
 func DeviceConfigPath(rootDir string) string {
 	return filepath.Join(rootDir, "config.yml")
 }
@@ -225,6 +331,9 @@ func LoadDeviceConfig(rootDir string) (DeviceConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return DeviceConfig{}, fmt.Errorf("parse device config: %w", err)
 	}
+	if len(cfg.Relays) > 0 {
+		cfg.SetRelayProfiles(cfg.Relays, cfg.ActiveRelay)
+	}
 	return cfg, nil
 }
 
@@ -233,6 +342,7 @@ func SaveDeviceConfig(rootDir string, cfg DeviceConfig) error {
 	if err := os.MkdirAll(rootDir, 0o700); err != nil {
 		return fmt.Errorf("create root dir: %w", err)
 	}
+	cfg.SetRelayProfiles(cfg.RelayProfiles(), cfg.ActiveRelay)
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("encode device config: %w", err)
