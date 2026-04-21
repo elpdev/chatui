@@ -35,11 +35,18 @@ type Theme struct {
 }
 
 // Themes is the built-in registry. The active theme is always one of these;
-// downstream code selects by name via Apply.
+// downstream code selects by name via Apply. "phosphor" is the default;
+// "classic" preserves the original 256-color palette for anyone who prefers
+// it.
 var Themes = map[string]Theme{
-	"default":  defaultTheme(),
 	"phosphor": phosphorTheme(),
+	"classic":  classicTheme(),
 }
+
+// DefaultThemeName is the theme applied when nothing else selects one. Kept
+// as an exported constant so downstream callers (config loaders, CLI) can
+// reference it without duplicating the string.
+const DefaultThemeName = "phosphor"
 
 // envThemeOverride is the env var callers can set to pick a theme at launch
 // before config-file selection is wired up. Unknown values fall back to the
@@ -146,12 +153,13 @@ func Apply(t Theme) {
 	BannerSlash = lipgloss.NewStyle().Foreground(t.BannerSlash)
 }
 
-// defaultTheme is the stock 256-color palette that pando shipped with
+// classicTheme is the stock 256-color palette that pando shipped with
 // before the theming system landed. Matches the hard-coded values that
-// used to live in styles.go.
-func defaultTheme() Theme {
+// used to live in styles.go. Kept available under the "classic" key for
+// anyone who prefers the original look.
+func classicTheme() Theme {
 	return Theme{
-		Name: "default",
+		Name: "classic",
 
 		Faint:  lipgloss.Color("240"),
 		Muted:  lipgloss.Color("241"),
@@ -188,8 +196,8 @@ func defaultTheme() Theme {
 
 // phosphorTheme is a CRT-terminal palette inspired by classic amber-on-green
 // phosphor monitors. All values live on a cool navy base, with phosphor green
-// for primary text and warm amber as the accent. Try it via
-// PANDO_THEME=phosphor until config-based selection lands.
+// for primary text and warm amber as the accent. This is pando's default
+// theme; override to the pre-theming 256-color look with PANDO_THEME=classic.
 func phosphorTheme() Theme {
 	return Theme{
 		Name: "phosphor",
@@ -231,7 +239,7 @@ func init() {
 	name := os.Getenv(envThemeOverride)
 	theme, ok := Themes[name]
 	if !ok {
-		theme = Themes["default"]
+		theme = Themes[DefaultThemeName]
 	}
 	Apply(theme)
 }

@@ -66,11 +66,23 @@ func TestApplySwapsActive(t *testing.T) {
 		t.Errorf("StatusInfo did not pick up phosphor cyan, got %v", StatusInfo.GetForeground())
 	}
 
-	Apply(Themes["default"])
-	if Current().Name != "default" {
-		t.Fatalf("expected active theme to be default after swap back, got %q", Current().Name)
+	Apply(Themes["classic"])
+	if Current().Name != "classic" {
+		t.Fatalf("expected active theme to be classic after swap back, got %q", Current().Name)
 	}
 	if StatusInfo.GetForeground() != lipgloss.TerminalColor(lipgloss.Color("69")) {
-		t.Errorf("StatusInfo did not restore default info color, got %v", StatusInfo.GetForeground())
+		t.Errorf("StatusInfo did not restore classic info color, got %v", StatusInfo.GetForeground())
+	}
+}
+
+func TestDefaultThemeIsPhosphor(t *testing.T) {
+	// Guard that no accidental rename splits DefaultThemeName from the
+	// registry; both must agree or init() applies a zero theme and every
+	// color renders as NoColor.
+	if _, ok := Themes[DefaultThemeName]; !ok {
+		t.Fatalf("DefaultThemeName %q not present in Themes", DefaultThemeName)
+	}
+	if DefaultThemeName != "phosphor" {
+		t.Errorf("expected DefaultThemeName to be phosphor, got %q", DefaultThemeName)
 	}
 }
