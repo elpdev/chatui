@@ -1,7 +1,9 @@
 package media
 
 import (
-	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,13 +59,19 @@ func TestRenderFileKittyInsideTmux(t *testing.T) {
 
 func writeTinyPNG(t *testing.T) string {
 	t.Helper()
-	data, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6nQAAAAASUVORK5CYII=")
-	if err != nil {
-		t.Fatalf("decode png fixture: %v", err)
-	}
 	path := filepath.Join(t.TempDir(), "tiny.png")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write png fixture: %v", err)
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.NRGBA{R: 255, A: 255})
+	img.Set(1, 0, color.NRGBA{G: 255, A: 255})
+	img.Set(0, 1, color.NRGBA{B: 255, A: 255})
+	img.Set(1, 1, color.NRGBA{R: 255, G: 255, A: 255})
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create png fixture: %v", err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatalf("encode png fixture: %v", err)
 	}
 	return path
 }

@@ -1,17 +1,20 @@
 package media
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
+	"image/png"
 	_ "image/png"
 	"math"
 	"os"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	_ "golang.org/x/image/webp"
 )
 
 type Protocol int
@@ -46,12 +49,11 @@ func RenderFile(path string, maxCols int) (string, int, error) {
 	if maxCols < 8 {
 		maxCols = 8
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", 0, fmt.Errorf("read image: %w", err)
-	}
 	rows := estimateImageRows(path, maxCols)
-	seq := renderBytes(data, maxCols, protocol)
+	seq, err := renderFile(path, maxCols, rows, protocol)
+	if err != nil {
+		return "", 0, err
+	}
 	if seq == "" {
 		return "", 0, nil
 	}
@@ -61,19 +63,35 @@ func RenderFile(path string, maxCols int) (string, int, error) {
 	return strings.Join(lines, "\n"), rows, nil
 }
 
-func renderBytes(data []byte, maxCols int, protocol Protocol) string {
-	encoded := base64.StdEncoding.EncodeToString(data)
+func ViewportPrefix() string {
+	if DetectProtocol() != ProtocolKitty {
+		return ""
+	}
+	return wrapPassthrough(ansi.KittyGraphics(nil, "a=d"))
+}
+
+func renderFile(path string, maxCols, rows int, protocol Protocol) (string, error) {
 	switch protocol {
 	case ProtocolITerm2:
-		return ansi.ITerm2(fmt.Sprintf("File=inline=1;width=%d;preserveAspectRatio=1:%s", maxCols, encoded))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read image: %w", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString(data)
+		return ansi.ITerm2(fmt.Sprintf("File=inline=1;width=%d;preserveAspectRatio=1:%s", maxCols, encoded)), nil
 	case ProtocolKitty:
-		return renderKitty(encoded, maxCols)
+		return renderKitty(path, maxCols, rows)
 	default:
-		return ""
+		return "", nil
 	}
 }
 
-func renderKitty(encoded string, maxCols int) string {
+func renderKitty(path string, maxCols, rows int) (string, error) {
+	data, err := kittyPayload(path)
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.StdEncoding.EncodeToString(data)
 	const chunkSize = 4096
 	var b strings.Builder
 	for i := 0; i < len(encoded); i += chunkSize {
@@ -84,9 +102,9 @@ func renderKitty(encoded string, maxCols int) string {
 		chunk := encoded[i:end]
 		first := i == 0
 		last := end == len(encoded)
-		opts := make([]string, 0, 4)
+		opts := make([]string, 0, 8)
 		if first {
-			opts = append(opts, "a=T", "f=100", fmt.Sprintf("c=%d", maxCols))
+			opts = append(opts, "a=T", "f=100", fmt.Sprintf("c=%d", maxCols), fmt.Sprintf("r=%d", rows), "C=1", "q=2")
 		}
 		switch {
 		case first && !last:
@@ -98,7 +116,24 @@ func renderKitty(encoded string, maxCols int) string {
 		}
 		b.WriteString(ansi.KittyGraphics([]byte(chunk), opts...))
 	}
-	return b.String()
+	return b.String(), nil
+}
+
+func kittyPayload(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open image: %w", err)
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, fmt.Errorf("decode image: %w", err)
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		return nil, fmt.Errorf("encode kitty payload as png: %w", err)
+	}
+	return b.Bytes(), nil
 }
 
 func wrapPassthrough(seq string) string {
