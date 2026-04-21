@@ -170,6 +170,11 @@ var peerAccentPalette = []lipgloss.Color{
 	lipgloss.Color("177"), // orchid
 }
 
+// BannerLetters is the color strip applied left-to-right across the PANDO
+// wordmark in the app header. Reuses the first five peer-accent hues so the
+// banner shares visual vocabulary with the sidebar and peer headings.
+var BannerLetters = peerAccentPalette[:5]
+
 // PeerAccent returns a stable color for the given fingerprint. An empty
 // fingerprint falls back to the ok (green) token.
 func PeerAccent(fingerprint string) lipgloss.Color {

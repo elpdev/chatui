@@ -61,12 +61,38 @@ var bannerLogo = [3]string{
 	"▀   ▀ ▀ ▀  ▀ ▀▀  ▀▀▀",
 }
 
+// bannerLetterSpans give the rune start/end (exclusive) of each PANDO
+// letter within a logo row, so we can render each letter in its own color.
+var bannerLetterSpans = [5][2]int{
+	{0, 3},   // P
+	{4, 7},   // A
+	{8, 12},  // N (4 runes wide)
+	{13, 16}, // D
+	{17, 20}, // O
+}
+
 const (
 	bannerLogoWidth = 20
 	bannerLeadSlash = 4
 	bannerMinWidth  = 48 // below this, collapse to the single-line meta row
 	bannerMinHeight = 20 // below this, give message history the real estate
 )
+
+func colorizeLogoRow(row string) string {
+	runes := []rune(row)
+	if len(runes) < bannerLogoWidth {
+		return style.StatusInfo.Bold(true).Render(row)
+	}
+	var b strings.Builder
+	for i, span := range bannerLetterSpans {
+		if i > 0 {
+			b.WriteRune(' ')
+		}
+		letterStyle := lipgloss.NewStyle().Foreground(style.BannerLetters[i]).Bold(true)
+		b.WriteString(letterStyle.Render(string(runes[span[0]:span[1]])))
+	}
+	return b.String()
+}
 
 // headerRows reports how many terminal rows the header occupies given the
 // current window size. The chat view uses this to size its message area.
@@ -90,10 +116,9 @@ func (a *App) renderHeader() string {
 	lead := style.Faint.Render(strings.Repeat("╱", bannerLeadSlash))
 	trailWidth := max(0, a.width-bannerLeadSlash-1-bannerLogoWidth-1)
 	trail := style.Faint.Render(strings.Repeat("╱", trailWidth))
-	logoStyle := style.StatusInfo.Bold(true)
 	rows := make([]string, 0, 4)
 	for _, line := range bannerLogo {
-		rows = append(rows, lead+" "+logoStyle.Render(line)+" "+trail)
+		rows = append(rows, lead+" "+colorizeLogoRow(line)+" "+trail)
 	}
 	meta := a.renderMetaLine()
 	if meta != "" {
