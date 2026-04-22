@@ -113,6 +113,9 @@ func (m *contactRequestsModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
+	if keyMsg.Type == tea.KeyEsc {
+		return false, nil
+	}
 	if m.busy {
 		return true, nil
 	}
@@ -320,7 +323,7 @@ func (m *Model) handleContactRequestUpdate(req *store.ContactRequest) {
 	}
 }
 
-func (m *contactRequestsModal) Body(width int) string {
+func (m *contactRequestsModal) Body(width, _ int) string {
 	bodyWidth := max(1, width)
 	parts := []string{m.renderBody(bodyWidth)}
 	if m.error != "" {

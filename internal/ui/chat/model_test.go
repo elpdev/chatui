@@ -425,21 +425,21 @@ func TestCommandPaletteOpensAddContactModalAndEscClosesIt(t *testing.T) {
 	model.SetSize(100, 20)
 
 	openPaletteCommand(t, model, "add contact")
-	if !model.addContact.open {
-		t.Fatal("expected add contact modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
+		t.Fatal("expected add contact view to open")
 	}
 	view := model.View()
-	if !strings.Contains(view, "Add Contact") {
-		t.Fatalf("expected add contact modal in view: %q", view)
+	if !strings.Contains(view, "Add contact") {
+		t.Fatalf("expected add contact breadcrumb in view: %q", view)
 	}
 
+	// Esc pops add-contact → Contacts → Pando root → close.
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	drainMsg(t, model, cmd)
-	if model.addContact.open {
-		t.Fatal("expected add contact modal to close")
-	}
-	if toast, _ := model.Toast(); toast != "add contact cancelled" {
-		t.Fatalf("unexpected toast: %q", toast)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after repeated esc")
 	}
 }
 
@@ -485,7 +485,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	}
 	drainMsg(t, model, cmd)
 
-	if model.addContact.open {
+	if model.commandPalette.open {
 		t.Fatal("expected add contact modal to close after import")
 	}
 	if model.peer.mailbox != "bob" {
@@ -591,7 +591,7 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 		t.Fatal("expected no preview when invite fails to parse")
 	}
 
-	if !model.addContact.open {
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
 		t.Fatal("expected modal to stay open on error")
 	}
 	if model.addContact.value != badInvite {

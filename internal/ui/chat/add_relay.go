@@ -64,6 +64,9 @@ func (m *addRelayModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
+	if keyMsg.Type == tea.KeyEsc {
+		return false, nil
+	}
 	switch keyMsg.Type {
 	case tea.KeyTab, tea.KeyShiftTab, tea.KeyUp, tea.KeyDown:
 		return true, m.moveFocus(keyMsg)
@@ -92,7 +95,7 @@ func (m *addRelayModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	return true, cmd
 }
 
-func (m *addRelayModal) Body(width int) string {
+func (m *addRelayModal) Body(width, _ int) string {
 	bodyWidth := max(1, width)
 	lines := []string{
 		style.PaletteMeta.Width(bodyWidth).Render("Save a named relay profile and switch to it immediately."),

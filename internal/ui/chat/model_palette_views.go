@@ -18,6 +18,8 @@ func (m *Model) resolvePaletteView(id paletteViewID) paletteView {
 		return &m.addRelay
 	case paletteViewContactRequests:
 		return &m.contactRequests
+	case paletteViewAddContact:
+		return &m.addContact
 	}
 	return nil
 }

@@ -27,9 +27,6 @@ func (m *Model) View() string {
 		right := m.renderConversation()
 		view = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
-	if m.addContact.open {
-		return m.clearInlineMedia(m.addContact.Overlay(view, m.ui.width, m.ui.height))
-	}
 	if m.commandPalette.open {
 		return m.clearInlineMedia(m.commandPalette.View(view, m.ui.width, m.ui.height, m.PeerLabel()))
 	}

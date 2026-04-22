@@ -240,8 +240,14 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m, nil
 	case addContactCompletedMsg:
 		return m.handleAddContactCompletedMsg(msg)
-	case addContactClosedMsg:
-		return m.handleAddContactClosedMsg(msg)
+	case addContactImportResultMsg:
+		return m.handleAddContactImportResult(msg)
+	case addContactLookupResultMsg:
+		return m.handleAddContactLookupResult(msg)
+	case addContactInviteExchangeResultMsg:
+		return m.handleAddContactInviteExchangeResult(msg)
+	case addContactInviteStartedMsg:
+		return m.handleAddContactInviteStarted(msg)
 	case addRelaySavedMsg:
 		return m.handleAddRelaySavedMsg(msg)
 	case contactRequestSendResultMsg:

@@ -16,9 +16,6 @@ func (m *Model) openCommandPalette() tea.Cmd {
 
 func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd {
 	switch action.command {
-	case commandPaletteCommandAddContact:
-		m.openAddContactModal()
-		return nil
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()
 	case commandPaletteCommandThemes:

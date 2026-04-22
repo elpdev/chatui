@@ -34,10 +34,11 @@ func (helpView) Update(msg tea.Msg) (bool, tea.Cmd) {
 	case key.Type == tea.KeyRunes && (string(key.Runes) == "?" || string(key.Runes) == "q"):
 		return true, dismissPaletteCmd()
 	}
-	return true, nil
+	// Let palette handle Esc and anything else.
+	return false, nil
 }
 
-func (helpView) Body(width int) string {
+func (helpView) Body(width, _ int) string {
 	colWidth := max(20, (width-2)/2)
 	navTitle := style.Bold.Render("Navigation")
 	msgTitle := style.Bold.Render("Messaging")

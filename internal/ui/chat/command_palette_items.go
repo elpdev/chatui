@@ -266,7 +266,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Import a peer invite, look up a mailbox, or verify with an exchange code.",
 					meta:    "ADD",
 					aliases: []string{"add", "invite", "import", "contact"},
-					action:  &commandPaletteAction{command: commandPaletteCommandAddContact},
+					view:    paletteViewAddContact,
 				},
 				{
 					id:      string(commandPaletteCommandSendContactRequest),

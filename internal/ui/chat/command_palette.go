@@ -251,15 +251,21 @@ func (m *commandPaletteModel) Update(msg tea.Msg) (*commandPaletteAction, tea.Cm
 	if !m.open {
 		return nil, nil
 	}
-	// When a view is active, Esc always belongs to the palette (back-nav);
-	// every other message is routed to the view first.
+	// When a view is active, route the message to it first. If the view
+	// doesn't handle it and it's an Esc key, the palette falls back to its
+	// default back-nav. This lets views with nested modes (e.g., add
+	// contact) consume Esc for internal transitions while simple views
+	// defer Esc to the palette.
 	if view := m.activeView(); view != nil {
+		handled, cmd := view.Update(msg)
+		if handled {
+			return nil, cmd
+		}
 		if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEsc {
 			m.back()
 			return nil, nil
 		}
-		_, cmd := view.Update(msg)
-		return nil, cmd
+		return nil, nil
 	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {

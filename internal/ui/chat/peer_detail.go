@@ -29,10 +29,10 @@ func (v *peerDetailView) Update(msg tea.Msg) (bool, tea.Cmd) {
 	if v.m.canVerifyActiveContact() && (key.String() == "v" || key.String() == "y") {
 		return true, paletteNavigateCmd(paletteNodeIDContacts, string(commandPaletteCommandVerifyContact))
 	}
-	return true, nil
+	return false, nil
 }
 
-func (v *peerDetailView) Body(int) string {
+func (v *peerDetailView) Body(int, int) string {
 	row := func(label, value string) string {
 		return style.Muted.Render(label) + "  " + value
 	}

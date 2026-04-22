@@ -49,10 +49,10 @@ func (m *contactVerifyModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	case "n", "q":
 		return true, paletteBackCmd()
 	}
-	return true, nil
+	return false, nil
 }
 
-func (m *contactVerifyModal) Body(width int) string {
+func (m *contactVerifyModal) Body(width, _ int) string {
 	bodyWidth := max(1, width)
 	rows := []string{
 		style.PaletteMeta.Width(bodyWidth).Render("Mark this contact as manually verified after confirming the fingerprint out-of-band."),

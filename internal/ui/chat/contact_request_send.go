@@ -62,6 +62,9 @@ func (m *contactRequestSendModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
+	if keyMsg.Type == tea.KeyEsc {
+		return false, nil
+	}
 	if m.busy {
 		return true, nil
 	}
@@ -89,7 +92,7 @@ func (m *contactRequestSendModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	return true, cmd
 }
 
-func (m *contactRequestSendModal) Body(width int) string {
+func (m *contactRequestSendModal) Body(width, _ int) string {
 	bodyWidth := max(1, width)
 	lines := []string{
 		style.PaletteMeta.Width(bodyWidth).Render("Send an outgoing contact request to a discoverable mailbox on the active relay."),

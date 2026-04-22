@@ -29,7 +29,7 @@ type paletteView interface {
 	Open(ctx viewOpenCtx) tea.Cmd
 	Close()
 	Update(msg tea.Msg) (handled bool, cmd tea.Cmd)
-	Body(width int) string
+	Body(width, height int) string
 	Subtitle() string
 	Footer() string
 }
