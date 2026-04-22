@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"time"
 )
 
 type Identity struct {
@@ -112,6 +113,16 @@ func (i *Identity) DeviceBundles() []DeviceBundle {
 		bundles = append(bundles, device.Bundle())
 	}
 	return bundles
+}
+
+func (i *Identity) CompactRevokedDevices(cutoff time.Time) {
+	kept := i.Devices[:0]
+	for _, device := range i.Devices {
+		if device.ID == i.CurrentDeviceID || !device.Revoked || device.RevokedAt.IsZero() || device.RevokedAt.After(cutoff) {
+			kept = append(kept, device)
+		}
+	}
+	i.Devices = kept
 }
 
 func (i *Identity) Validate() error {

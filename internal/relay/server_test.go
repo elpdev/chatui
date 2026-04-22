@@ -15,6 +15,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/gorilla/websocket"
 )
 
@@ -414,7 +415,7 @@ func TestDirectoryEntryRoundTripOverHTTP(t *testing.T) {
 	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
 	defer server.Close()
 	alice := mustIdentity(t, "alice")
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestDiscoverableDirectoryListingAndDeviceLookupOverHTTP(t *testing.T) {
 	defer server.Close()
 	alice := mustIdentity(t, "alice")
 	bob := mustIdentity(t, "bob")
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
@@ -616,7 +617,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 
 func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
 	t.Helper()
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}

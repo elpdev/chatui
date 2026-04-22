@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/elpdev/pando/internal/relayclient"
 )
 
 const authHeader = "X-Pando-Relay-Token"
@@ -18,12 +20,20 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(relayURL, token string) (*Client, error) {
+func NewClient(relayURL, token string, options relayclient.ClientOptions) (*Client, error) {
 	baseURL, err := RelayHTTPBaseURL(relayURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{baseURL: baseURL, token: token, httpClient: &http.Client{Timeout: 15 * time.Second}}, nil
+	tlsConfig, err := relayclient.TLSConfigForURL(baseURL, options)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	if tlsConfig != nil {
+		httpClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
+	}
+	return &Client{baseURL: baseURL, token: token, httpClient: httpClient}, nil
 }
 
 func RelayHTTPBaseURL(relayURL string) (string, error) {

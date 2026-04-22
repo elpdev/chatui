@@ -9,6 +9,7 @@ import (
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/rendezvous"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -46,7 +47,7 @@ func runContactInviteStart(args []string) error {
 	}
 	fmt.Printf("invite code: %s\n", generatedCode)
 	fmt.Println("tell the other person to run: pando contact invite accept --mailbox <their-mailbox> --code <invite-code>")
-	return runInviteExchange(*bfs.RootDir, *bfs.DataDir, *bfs.Mailbox, *relayURL, *relayToken, generatedCode, *timeout)
+	return runInviteExchange(*bfs.RootDir, *bfs.DataDir, *bfs.Mailbox, *relayURL, *relayToken, *bfs.RelayCA, generatedCode, *timeout)
 }
 
 func runContactInviteAccept(args []string) error {
@@ -61,10 +62,10 @@ func runContactInviteAccept(args []string) error {
 	if strings.TrimSpace(*code) == "" {
 		return fmt.Errorf("-code is required")
 	}
-	return runInviteExchange(*bfs.RootDir, *bfs.DataDir, *bfs.Mailbox, *relayURL, *relayToken, *code, *timeout)
+	return runInviteExchange(*bfs.RootDir, *bfs.DataDir, *bfs.Mailbox, *relayURL, *relayToken, *bfs.RelayCA, *code, *timeout)
 }
 
-func runInviteExchange(rootDir, dataDir, mailbox, relayURL, relayToken, code string, timeout time.Duration) error {
+func runInviteExchange(rootDir, dataDir, mailbox, relayURL, relayToken, relayCAPath, code string, timeout time.Duration) error {
 	resolvedMailbox, resolvedDataDir, err := resolveDataDirWithRoot(rootDir, dataDir, mailbox)
 	if err != nil {
 		return err
@@ -81,7 +82,7 @@ func runInviteExchange(rootDir, dataDir, mailbox, relayURL, relayToken, code str
 	if err != nil {
 		return err
 	}
-	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: relayCAPath})
 	if err != nil {
 		return err
 	}

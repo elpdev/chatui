@@ -10,6 +10,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -25,7 +26,7 @@ func runDiscoverContacts(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA})
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func runRequestContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA})
 	if err != nil {
 		return err
 	}
@@ -101,7 +102,7 @@ func runRequestContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
+	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA}, envelopes); err != nil {
 		return err
 	}
 	if err := service.SaveContactRequest(request); err != nil {
@@ -206,7 +207,7 @@ func runResolveContactRequest(name string, args []string, decision string) error
 	if err != nil {
 		return err
 	}
-	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
+	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA}, envelopes); err != nil {
 		return err
 	}
 	request.UpdatedAt = time.Now().UTC()

@@ -20,6 +20,7 @@ const (
 type Client struct {
 	RelayURL         string
 	RelayToken       string
+	RelayCAPath      string
 	Mailbox          string
 	RecipientMailbox string
 	RootDir          string

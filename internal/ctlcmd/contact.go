@@ -8,6 +8,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -235,7 +236,7 @@ func runPublishDirectory(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := relayapi.PublishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, *discoverable); err != nil {
+	if err := relayapi.PublishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA}, *discoverable); err != nil {
 		return err
 	}
 	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
@@ -270,7 +271,7 @@ func runLookupContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken, relayclient.ClientOptions{CAPath: *bfs.RelayCA})
 	if err != nil {
 		return err
 	}

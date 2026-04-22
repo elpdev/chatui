@@ -9,17 +9,24 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/gorilla/websocket"
 )
 
 // PublishEnvelopes opens a short-lived relay websocket connection and publishes
 // each envelope, waiting for the relay ack before sending the next one.
-func PublishEnvelopes(ctx context.Context, relayURL, relayToken string, envelopes []protocol.Envelope) error {
+
+func PublishEnvelopes(ctx context.Context, relayURL, relayToken string, options relayclient.ClientOptions, envelopes []protocol.Envelope) error {
+	tlsConfig, err := relayclient.TLSConfigForURL(relayURL, options)
+	if err != nil {
+		return err
+	}
 	headers := http.Header{}
 	if relayToken != "" {
 		headers.Set(authHeader, relayToken)
 	}
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, headers)
+	dialer := websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: tlsConfig}
+	conn, _, err := dialer.DialContext(ctx, relayURL, headers)
 	if err != nil {
 		return err
 	}
@@ -49,8 +56,8 @@ func PublishEnvelopes(ctx context.Context, relayURL, relayToken string, envelope
 
 // PublishIdentityDirectoryEntry signs and publishes the current identity's
 // relay-backed directory entry.
-func PublishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string, discoverable bool) error {
-	client, err := NewClient(relayURL, relayToken)
+func PublishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string, options relayclient.ClientOptions, discoverable bool) error {
+	client, err := NewClient(relayURL, relayToken, options)
 	if err != nil {
 		return err
 	}

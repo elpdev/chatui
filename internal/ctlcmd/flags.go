@@ -12,6 +12,7 @@ type BaseFlagSet struct {
 	Mailbox *string
 	RootDir *string
 	DataDir *string
+	RelayCA *string
 	FS      *flag.FlagSet
 }
 
@@ -21,11 +22,13 @@ func NewBaseFlagSet(name string) *BaseFlagSet {
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
+	relayCA := fs.String("relay-ca", "", "PEM CA bundle for TLS relay connections")
 	return &BaseFlagSet{
 		Name:    name,
 		Mailbox: mailbox,
 		RootDir: rootDir,
 		DataDir: dataDir,
+		RelayCA: relayCA,
 		FS:      fs,
 	}
 }

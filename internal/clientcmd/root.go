@@ -15,6 +15,7 @@ import (
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/passphrase"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui"
@@ -49,6 +50,7 @@ func Execute(args []string) error {
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.RelayURL, "relay", cfg.RelayURL, "relay websocket URL")
 	fs.StringVar(&cfg.RelayToken, "relay-token", cfg.RelayToken, "relay auth token")
+	fs.StringVar(&cfg.RelayCAPath, "relay-ca", cfg.RelayCAPath, "PEM CA bundle for TLS relay connections")
 	fs.StringVar(&cfg.Mailbox, "mailbox", cfg.Mailbox, "local mailbox identifier")
 	fs.StringVar(&cfg.RecipientMailbox, "to", "", "recipient mailbox identifier")
 	fs.StringVar(&cfg.RootDir, "root-dir", cfg.RootDir, "root directory for Pando storage")
@@ -75,14 +77,15 @@ func Execute(args []string) error {
 		return err
 	}
 	service.SetMessageTTL(devCfg.EffectiveMessageTTL())
+	relayOptions := relayclient.ClientOptions{CAPath: cfg.RelayCAPath}
 	if strings.TrimSpace(cfg.RelayURL) != "" {
-		directoryClient, err := relayapi.NewClient(cfg.RelayURL, cfg.RelayToken)
+		directoryClient, err := relayapi.NewClient(cfg.RelayURL, cfg.RelayToken, relayOptions)
 		if err != nil {
 			return err
 		}
 		service.SetDirectoryClient(directoryClient)
 	}
-	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, service.Identity())
+	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, service.Identity(), relayOptions)
 	chatModel := chat.New(chat.Deps{
 		Client:           client,
 		Messaging:        service,
@@ -90,6 +93,7 @@ func Execute(args []string) error {
 		RecipientMailbox: cfg.RecipientMailbox,
 		RelayURL:         cfg.RelayURL,
 		RelayToken:       cfg.RelayToken,
+		RelayCAPath:      cfg.RelayCAPath,
 		RelayProfiles:    devCfg.RelayProfiles(),
 		SaveTheme: func(name string) error {
 			devCfg, err := config.LoadDeviceConfig(rootDir)

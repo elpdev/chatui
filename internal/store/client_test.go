@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/elpdev/pando/internal/identity"
 )
@@ -86,4 +87,79 @@ func TestSaveAttachmentEncryptsBytesAndReadAttachmentDecrypts(t *testing.T) {
 	if !bytes.Equal(plaintext, original) {
 		t.Fatal("expected decrypted attachment bytes to match original")
 	}
+}
+
+func TestSaveIdentityCompactsOldRevokedDevices(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id := mustIdentityWithSecondDevice(t, "alice", "alice-phone")
+	if err := id.RevokeDevice("alice-phone"); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+	id.Devices[1].RevokedAt = time.Now().UTC().Add(-31 * 24 * time.Hour)
+
+	if err := clientStore.SaveIdentity(id); err != nil {
+		t.Fatalf("save identity: %v", err)
+	}
+	loaded, err := clientStore.LoadIdentity()
+	if err != nil {
+		t.Fatalf("load identity: %v", err)
+	}
+	if len(loaded.Devices) != 1 {
+		t.Fatalf("expected old revoked device to be compacted, got %d devices", len(loaded.Devices))
+	}
+}
+
+func TestSaveIdentityKeepsRecentRevokedDevices(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id := mustIdentityWithSecondDevice(t, "alice", "alice-phone")
+	if err := id.RevokeDevice("alice-phone"); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+	id.Devices[1].RevokedAt = time.Now().UTC().Add(-7 * 24 * time.Hour)
+
+	if err := clientStore.SaveIdentity(id); err != nil {
+		t.Fatalf("save identity: %v", err)
+	}
+	loaded, err := clientStore.LoadIdentity()
+	if err != nil {
+		t.Fatalf("load identity: %v", err)
+	}
+	if len(loaded.Devices) != 2 {
+		t.Fatalf("expected recent revoked device to be retained, got %d devices", len(loaded.Devices))
+	}
+}
+
+func TestCompactRevokedDevicesKeepsCurrentDevice(t *testing.T) {
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	id.Devices[0].Revoked = true
+	id.Devices[0].RevokedAt = time.Now().UTC().Add(-31 * 24 * time.Hour)
+
+	id.CompactRevokedDevices(time.Now().UTC().Add(-30 * 24 * time.Hour))
+
+	if len(id.Devices) != 1 {
+		t.Fatalf("expected current device to be retained, got %d devices", len(id.Devices))
+	}
+}
+
+func mustIdentityWithSecondDevice(t *testing.T, accountID, mailbox string) *identity.Identity {
+	t.Helper()
+	id, err := identity.New(accountID)
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	pending, err := identity.NewPendingEnrollment(accountID, mailbox)
+	if err != nil {
+		t.Fatalf("new pending enrollment: %v", err)
+	}
+	approval, err := id.Approve(pending.Request())
+	if err != nil {
+		t.Fatalf("approve enrollment: %v", err)
+	}
+	if _, err := pending.Complete(*approval); err != nil {
+		t.Fatalf("complete enrollment: %v", err)
+	}
+	return id
 }

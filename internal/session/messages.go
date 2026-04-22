@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 
@@ -69,11 +70,11 @@ func Decrypt(recipient *identity.Identity, sender *identity.Contact, envelope pr
 	if senderDevice.Revoked {
 		return "", fmt.Errorf("sender device %s is revoked", senderDevice.Mailbox)
 	}
-	if envelope.SenderDeviceSigningPublic != base64.StdEncoding.EncodeToString(senderDevice.SigningPublic) {
-		return "", fmt.Errorf("sender signing key does not match stored contact device")
+	if err := compareEnvelopeKey(envelope.SenderDeviceSigningPublic, senderDevice.SigningPublic, "signing"); err != nil {
+		return "", err
 	}
-	if envelope.SenderDeviceEncryptionPublic != base64.StdEncoding.EncodeToString(senderDevice.EncryptionPublic) {
-		return "", fmt.Errorf("sender encryption key does not match stored contact device")
+	if err := compareEnvelopeKey(envelope.SenderDeviceEncryptionPublic, senderDevice.EncryptionPublic, "encryption"); err != nil {
+		return "", err
 	}
 	signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
 	if err != nil {
@@ -121,4 +122,15 @@ func bytesToKey(value []byte) (*[32]byte, error) {
 	var key [32]byte
 	copy(key[:], value)
 	return &key, nil
+}
+
+func compareEnvelopeKey(encoded string, expected []byte, keyName string) error {
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("decode sender %s key: %w", keyName, err)
+	}
+	if len(decoded) != len(expected) || subtle.ConstantTimeCompare(decoded, expected) != 1 {
+		return fmt.Errorf("sender %s key does not match stored contact device", keyName)
+	}
+	return nil
 }

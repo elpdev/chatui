@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/elpdev/pando/internal/identity"
@@ -70,6 +71,66 @@ func TestDecryptRejectsMismatchedSenderKeys(t *testing.T) {
 
 	if _, err := Decrypt(bob, eveContact, envelopes[0]); err == nil {
 		t.Fatalf("expected decrypt to fail for mismatched sender keys")
+	}
+}
+
+func TestDecryptRejectsMismatchedSenderEncryptionKey(t *testing.T) {
+	alice, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new alice identity: %v", err)
+	}
+	bob, err := identity.New("bob")
+	if err != nil {
+		t.Fatalf("new bob identity: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bob.InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(alice.InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+
+	envelopes, err := Encrypt(alice, bobContact, "hello bob")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	envelope := envelopes[0]
+	envelope.SenderDeviceEncryptionPublic = base64.StdEncoding.EncodeToString([]byte("wrong-encryption-public-key-12345"))
+
+	if _, err := Decrypt(bob, aliceContact, envelope); err == nil {
+		t.Fatal("expected decrypt to fail for mismatched sender encryption key")
+	}
+}
+
+func TestDecryptRejectsMalformedSenderKeyEncoding(t *testing.T) {
+	alice, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new alice identity: %v", err)
+	}
+	bob, err := identity.New("bob")
+	if err != nil {
+		t.Fatalf("new bob identity: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bob.InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(alice.InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+
+	envelopes, err := Encrypt(alice, bobContact, "hello bob")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	envelope := envelopes[0]
+	envelope.SenderDeviceSigningPublic = "%"
+
+	if _, err := Decrypt(bob, aliceContact, envelope); err == nil {
+		t.Fatal("expected decrypt to fail for malformed sender signing key")
 	}
 }
 

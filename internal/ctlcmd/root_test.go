@@ -23,6 +23,7 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 	wsclient "github.com/elpdev/pando/internal/transport/ws"
 	"rsc.io/qr"
@@ -365,7 +366,7 @@ func TestIdentityInitCanPublishDirectoryEntry(t *testing.T) {
 	if !strings.Contains(output, "published trusted relay directory entry for alice") {
 		t.Fatalf("expected publish confirmation, got %q", output)
 	}
-	client, err := relayapi.NewClient(serverURL, "secret")
+	client, err := relayapi.NewClient(serverURL, "secret", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
@@ -759,12 +760,12 @@ func receiveNextControlResult(t *testing.T, serverURL, dataDir, mailbox string) 
 	if err != nil {
 		t.Fatalf("new messaging service for %s: %v", mailbox, err)
 	}
-	directoryClient, err := relayapi.NewClient(serverURL, "secret")
+	directoryClient, err := relayapi.NewClient(serverURL, "secret", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
 	service.SetDirectoryClient(directoryClient)
-	client := wsclient.NewClient(serverURL, "secret", service.Identity())
+	client := wsclient.NewClient(serverURL, "secret", service.Identity(), relayclient.ClientOptions{})
 	defer client.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

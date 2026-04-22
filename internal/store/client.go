@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/elpdev/pando/internal/identity"
 )
@@ -153,6 +154,7 @@ func (s *ClientStore) SaveIdentity(id *identity.Identity) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
+	id.CompactRevokedDevices(time.Now().UTC().Add(-30 * 24 * time.Hour))
 	return s.writeProtectedJSON(s.identityPath(), id, 0o600)
 }
 

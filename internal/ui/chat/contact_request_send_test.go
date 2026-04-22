@@ -11,6 +11,7 @@ import (
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 )
 
@@ -30,7 +31,7 @@ func TestSendContactRequestPersistsOutgoingRequest(t *testing.T) {
 	_, peerService := newChatModel(t, "bob", nil, "ws://relay/ws")
 	seedDiscoverableDirectory(t, relay, peerService)
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
-	model.contactRequestSend.deps.publishEnvelopes = func(_ context.Context, relayURL, relayToken string, envelopes []protocol.Envelope) error {
+	model.contactRequestSend.deps.publishEnvelopes = func(_ context.Context, relayURL, relayToken string, _ relayclient.ClientOptions, envelopes []protocol.Envelope) error {
 		if relayURL != "ws://relay/ws" {
 			t.Fatalf("expected relay url ws://relay/ws, got %q", relayURL)
 		}
@@ -99,7 +100,7 @@ func TestSendContactRequestShowsPublishError(t *testing.T) {
 	_, peerService := newChatModel(t, "bob", nil, "ws://relay/ws")
 	seedDiscoverableDirectory(t, relay, peerService)
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
-	model.contactRequestSend.deps.publishEnvelopes = func(context.Context, string, string, []protocol.Envelope) error {
+	model.contactRequestSend.deps.publishEnvelopes = func(context.Context, string, string, relayclient.ClientOptions, []protocol.Envelope) error {
 		return errors.New("relay down")
 	}
 	openPaletteCommand(t, model, "send contact request")

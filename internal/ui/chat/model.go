@@ -12,6 +12,7 @@ import (
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/transport"
 	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui/audio"
@@ -82,7 +83,7 @@ func New(deps Deps) *Model {
 	if transportFactory == nil {
 		identity := deps.Messaging.Identity()
 		transportFactory = func(url, token string) transport.Client {
-			return ws.NewClient(url, token, identity)
+			return ws.NewClient(url, token, identity, relayclient.ClientOptions{})
 		}
 	}
 	profiles := append([]config.RelayProfile(nil), deps.RelayProfiles...)
@@ -157,6 +158,9 @@ func New(deps Deps) *Model {
 			return m.relay.token
 		},
 		publishEnvelopes: publishRelayEnvelopes,
+		relayCAPath: func() string {
+			return deps.RelayCAPath
+		},
 	})
 	m.contactRequests = newContactRequestsModal(contactRequestsDeps{
 		decide: m.makeContactRequestDecision,
@@ -174,7 +178,7 @@ func New(deps Deps) *Model {
 }
 
 func defaultRelayClientFactory(url, token string) (RelayClient, error) {
-	return relayapi.NewClient(url, token)
+	return relayapi.NewClient(url, token, relayclient.ClientOptions{})
 }
 
 func relayProfileName(profiles []config.RelayProfile, url, token string) string {
