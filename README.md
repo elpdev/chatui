@@ -105,6 +105,22 @@ Useful shortcuts:
 - `pando contact lookup --mailbox alice --contact bob` imports a relay directory entry directly when you already trust that mailbox.
 - `pando` starts the TUI using your configured defaults.
 
+### Voice note playback
+
+Pando can browse and play recent voice notes from the command palette in the active chat.
+
+Playback uses an external audio player instead of embedding a platform-specific audio engine in the client binary. This keeps release binaries portable across Homebrew, AUR, direct downloads, and static builds.
+
+Pando will try these players in order, depending on the file type and platform:
+
+- `mpv`
+- `ffplay`
+- `cvlc`
+- macOS: `afplay`
+- WAV on Linux: `pw-play`, `paplay`, `aplay`
+
+If none of these are installed, voice note playback will fail with a clear message telling you which commands Pando looked for.
+
 For invite-code exchange, QR sharing, device enrollment, and the lower-level contact flows, use the wiki.
 
 ### Storage location

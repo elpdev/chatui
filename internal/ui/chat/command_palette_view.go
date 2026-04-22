@@ -81,6 +81,8 @@ func (m commandPaletteModel) subtitle(peerLabel string) string {
 			return "Choose the active relay for this device."
 		}
 		return fmt.Sprintf("Choose the active relay. Current: %s", current)
+	case paletteNodeIDVoiceNotes:
+		return "Choose a recent voice note from this chat. Selecting one replaces the current playback."
 	case paletteNodeIDEditRelay:
 		return "Choose a saved relay profile to update its name, URL, or token."
 	case paletteNodeIDRemoveRelay:
@@ -101,7 +103,7 @@ func (m commandPaletteModel) footer() string {
 		return "type filter · up/down browse · enter select · esc back"
 	}
 	switch node.id {
-	case paletteNodeIDTheme, paletteNodeIDMessageTTL:
+	case paletteNodeIDTheme, paletteNodeIDMessageTTL, paletteNodeIDVoiceNotes:
 		return "type filter · up/down browse · enter apply · esc back"
 	case paletteNodeIDSwitchRelay:
 		return "type filter · up/down browse · enter switch · esc back"

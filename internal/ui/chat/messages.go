@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
@@ -174,6 +175,17 @@ func (m *Model) handleIncomingError(msg *protocol.Error) {
 	if msg != nil {
 		m.pushToast(fmt.Sprintf("relay error: %s", msg.Message), ToastBad)
 	}
+}
+
+func (m *Model) handleVoicePlaybackResultMsg(msg voicePlaybackResultMsg) (*Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pushToast(fmt.Sprintf("playback failed: %v", msg.err), ToastBad)
+		return m, nil
+	}
+	if msg.filename != "" {
+		m.pushToast(fmt.Sprintf("playing voice note: %s", msg.filename), ToastInfo)
+	}
+	return m, nil
 }
 
 // outgoingItemExpiresAt computes the expiry to stamp on an outbound transcript

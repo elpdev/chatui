@@ -24,6 +24,9 @@ const (
 	commandPaletteCommandEditRelay          commandPaletteCommand = "edit-relay"
 	commandPaletteCommandThemes             commandPaletteCommand = "themes"
 	commandPaletteCommandMessageTTL         commandPaletteCommand = "message-ttl"
+	commandPaletteCommandVoiceNotes         commandPaletteCommand = "voice-notes"
+	commandPaletteCommandPlayVoiceNote      commandPaletteCommand = "play-voice-note"
+	commandPaletteCommandStopVoiceNote      commandPaletteCommand = "stop-voice-note"
 )
 
 // Node ids for structural tree groups. Leaf nodes reuse the command constants
@@ -37,6 +40,7 @@ const (
 	paletteNodeIDRemoveRelay = "remove-relay"
 	paletteNodeIDTheme       = "theme"
 	paletteNodeIDMessageTTL  = "message-ttl"
+	paletteNodeIDVoiceNotes  = "voice-notes"
 )
 
 var messageTTLOptions = []time.Duration{
@@ -59,6 +63,8 @@ type commandPaletteDeps struct {
 type paletteCtx struct {
 	hasPeer              bool
 	pendingRequestsCount int
+	voiceNotes           []voiceNoteOption
+	voicePlaybackActive  bool
 	deps                 commandPaletteDeps
 }
 
@@ -85,9 +91,9 @@ type commandPaletteItem struct {
 	detail     string
 	meta       string
 	aliases    []string
-	breadcrumb string // parent path label shown before title in search results
+	breadcrumb string
 	node       paletteNode
-	nodePath   []string // full path (ids) from root to this node
+	nodePath   []string
 }
 
 type commandPaletteVisibleItem struct {
@@ -96,22 +102,23 @@ type commandPaletteVisibleItem struct {
 }
 
 type commandPaletteAction struct {
-	command    commandPaletteCommand
-	themeName  string
-	relayName  string
-	messageTTL time.Duration
+	command     commandPaletteCommand
+	themeName   string
+	relayName   string
+	messageTTL  time.Duration
+	voiceNoteID string
 }
 
 type commandPaletteModel struct {
 	deps                 commandPaletteDeps
 	hasPeer              bool
 	pendingRequestsCount int
+	voiceNotes           []voiceNoteOption
+	voicePlaybackActive  bool
 	open                 bool
-	// path is the stack of node ids from root to the current location. Empty
-	// path means the user is at the root level.
-	path     []string
-	selected int
-	filter   textinput.Model
+	path                 []string
+	selected             int
+	filter               textinput.Model
 }
 
 func newCommandPaletteModel(deps commandPaletteDeps) commandPaletteModel {
@@ -130,9 +137,11 @@ func (m *commandPaletteModel) Open() tea.Cmd {
 	return m.filter.Focus()
 }
 
-func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int) {
+func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int, voiceNotes []voiceNoteOption, voicePlaybackActive bool) {
 	m.hasPeer = hasPeer
 	m.pendingRequestsCount = pendingRequestsCount
+	m.voiceNotes = append(m.voiceNotes[:0], voiceNotes...)
+	m.voicePlaybackActive = voicePlaybackActive
 }
 
 func (m *commandPaletteModel) Close() {
@@ -157,6 +166,8 @@ func (m *commandPaletteModel) ctx() paletteCtx {
 	return paletteCtx{
 		hasPeer:              m.hasPeer,
 		pendingRequestsCount: m.pendingRequestsCount,
+		voiceNotes:           append([]voiceNoteOption(nil), m.voiceNotes...),
+		voicePlaybackActive:  m.voicePlaybackActive,
 		deps:                 m.deps,
 	}
 }

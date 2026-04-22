@@ -9,7 +9,7 @@ import (
 )
 
 func (m *Model) openCommandPalette() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount)
+	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount, m.recentVoiceNotes(), m.voicePlayer != nil && m.voicePlayer.IsPlaying())
 	m.input.Blur()
 	return m.commandPalette.Open()
 }
@@ -37,6 +37,12 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return m.applyPaletteTheme(action.themeName)
 	case commandPaletteCommandSwitchRelay:
 		return m.switchRelay(action.relayName)
+	case commandPaletteCommandPlayVoiceNote:
+		return m.playVoiceNoteCmd(action.voiceNoteID)
+	case commandPaletteCommandStopVoiceNote:
+		return m.stopVoiceNotePlayback()
+	case commandPaletteCommandVoiceNotes:
+		return nil
 	case commandPaletteCommandAddRelay:
 		return m.openAddRelayModal()
 	case commandPaletteCommandRemoveRelay:

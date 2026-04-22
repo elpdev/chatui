@@ -14,13 +14,15 @@ import (
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/transport"
 	"github.com/elpdev/pando/internal/transport/ws"
+	"github.com/elpdev/pando/internal/ui/audio"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type Model struct {
-	client    transport.Client
-	messaging *messaging.Service
-	mailbox   string
+	client      transport.Client
+	messaging   *messaging.Service
+	voicePlayer VoicePlayer
+	mailbox     string
 
 	relay    relayState
 	peer     peerState
@@ -88,9 +90,10 @@ func New(deps Deps) *Model {
 	profiles := append([]config.RelayProfile(nil), deps.RelayProfiles...)
 	active := relayProfileName(profiles, deps.RelayURL, deps.RelayToken)
 	m := &Model{
-		client:    deps.Client,
-		messaging: deps.Messaging,
-		mailbox:   deps.Mailbox,
+		client:      deps.Client,
+		messaging:   deps.Messaging,
+		voicePlayer: deps.VoicePlayer,
+		mailbox:     deps.Mailbox,
 		relay: relayState{
 			url:              deps.RelayURL,
 			token:            deps.RelayToken,
@@ -112,6 +115,9 @@ func New(deps Deps) *Model {
 		selectedIndex: -1,
 		filePicker:    newFilePickerModel(),
 		unread:        map[string]int{},
+	}
+	if m.voicePlayer == nil {
+		m.voicePlayer = audio.NewPlayer()
 	}
 	m.commandPalette = newCommandPaletteModel(commandPaletteDeps{
 		applyTheme: style.Apply,
@@ -264,6 +270,8 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleTypingTickMsg(msg)
 	case sendResultMsg:
 		return m.handleSendResultMsg(msg)
+	case voicePlaybackResultMsg:
+		return m.handleVoicePlaybackResultMsg(msg)
 	case typingSendResultMsg:
 		return m.handleTypingSendResultMsg(msg)
 	case roomHistorySyncResultMsg:
@@ -298,6 +306,12 @@ func (m *Model) pushToast(text string, level ToastLevel) {
 }
 
 func (m *Model) Close() error {
+	if m.voicePlayer != nil {
+		if err := m.voicePlayer.Close(); err != nil {
+			_ = m.client.Close()
+			return err
+		}
+	}
 	return m.client.Close()
 }
 
