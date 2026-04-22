@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/transport"
 )
 
@@ -28,7 +30,7 @@ func TestConnectReturnsUnauthorizedErrorForBadHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new identity: %v", err)
 	}
-	client := NewClient("ws"+server.URL[len("http"):], "wrong-token", aliceID)
+	client := NewClient("ws"+server.URL[len("http"):], "wrong-token", aliceID, relayclient.ClientOptions{})
 	err = client.Connect(context.Background())
 	if err == nil {
 		t.Fatal("expected unauthorized error")
@@ -49,7 +51,7 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new alice identity: %v", err)
 	}
-	alice := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID)
+	alice := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID, relayclient.ClientOptions{})
 	defer alice.Close()
 	publishDirectoryEntry(t, server, aliceID)
 	if err := alice.Connect(ctx); err != nil {
@@ -60,7 +62,7 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new bob identity: %v", err)
 	}
-	bob := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobID)
+	bob := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobID, relayclient.ClientOptions{})
 	defer bob.Close()
 	publishDirectoryEntry(t, server, bobID)
 	if err := bob.Connect(ctx); err != nil {
@@ -117,7 +119,7 @@ func TestConnectRequiresPublishedDirectoryEntryBeforeFirstSubscribe(t *testing.T
 	if err != nil {
 		t.Fatalf("new alice identity: %v", err)
 	}
-	client := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID)
+	client := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID, relayclient.ClientOptions{})
 	defer client.Close()
 
 	err = client.Connect(ctx)
@@ -141,6 +143,18 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(testWriter{}, nil))
 }
 
+func TestConnectRejectsInvalidRelayCAForTLS(t *testing.T) {
+	aliceID, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	client := NewClient("wss://relay.example/ws", "", aliceID, relayclient.ClientOptions{CAPath: filepath.Join(t.TempDir(), "missing.pem")})
+	err = client.Connect(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "read relay CA file") {
+		t.Fatalf("expected relay CA read error, got %v", err)
+	}
+}
+
 type testWriter struct{}
 
 func (testWriter) Write(p []byte) (n int, err error) {
@@ -149,7 +163,7 @@ func (testWriter) Write(p []byte) (n int, err error) {
 
 func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
 	t.Helper()
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}

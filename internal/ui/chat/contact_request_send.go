@@ -10,6 +10,7 @@ import (
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -20,7 +21,8 @@ type contactRequestSendDeps struct {
 	relayConfigured   func() bool
 	relayURL          func() string
 	relayToken        func() string
-	publishEnvelopes  func(context.Context, string, string, []protocol.Envelope) error
+	relayCAPath       func() string
+	publishEnvelopes  func(context.Context, string, string, relayclient.ClientOptions, []protocol.Envelope) error
 }
 
 type contactRequestSendModal struct {
@@ -146,7 +148,7 @@ func contactRequestSendCmd(deps contactRequestSendDeps, mailbox, note string) te
 		if err != nil {
 			return contactRequestSendResultMsg{err: err}
 		}
-		if err := deps.publishEnvelopes(context.Background(), deps.relayURL(), deps.relayToken(), envelopes); err != nil {
+		if err := deps.publishEnvelopes(context.Background(), deps.relayURL(), deps.relayToken(), relayclient.ClientOptions{CAPath: deps.relayCAPath()}, envelopes); err != nil {
 			return contactRequestSendResultMsg{err: err}
 		}
 		if err := deps.messaging.SaveContactRequest(request); err != nil {
@@ -174,8 +176,8 @@ func (m *Model) handleContactRequestSendResult(msg contactRequestSendResultMsg) 
 	return m, nil
 }
 
-func publishRelayEnvelopes(ctx context.Context, relayURL, relayToken string, envelopes []protocol.Envelope) error {
-	return relayapi.PublishEnvelopes(ctx, relayURL, relayToken, envelopes)
+func publishRelayEnvelopes(ctx context.Context, relayURL, relayToken string, options relayclient.ClientOptions, envelopes []protocol.Envelope) error {
+	return relayapi.PublishEnvelopes(ctx, relayURL, relayToken, options, envelopes)
 }
 
 func renderContactRequestSendInput(width int, label string, input textinput.Model, focused bool) string {

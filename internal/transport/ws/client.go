@@ -12,6 +12,7 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/transport"
 	"github.com/gorilla/websocket"
 )
@@ -24,6 +25,7 @@ type Client struct {
 	token   string
 	mailbox string
 	device  *identity.Device
+	options relayclient.ClientOptions
 
 	mu     sync.Mutex
 	conn   *websocket.Conn
@@ -31,7 +33,7 @@ type Client struct {
 	closed bool
 }
 
-func NewClient(url, token string, id *identity.Identity) *Client {
+func NewClient(url, token string, id *identity.Identity, options relayclient.ClientOptions) *Client {
 	var device *identity.Device
 	if id != nil {
 		device, _ = id.CurrentDevice()
@@ -45,12 +47,17 @@ func NewClient(url, token string, id *identity.Identity) *Client {
 		token:   token,
 		mailbox: mailbox,
 		device:  device,
+		options: options,
 		events:  make(chan transport.Event, 32),
 	}
 }
 
 func (c *Client) Connect(ctx context.Context) error {
-	dialer := websocket.Dialer{Proxy: http.ProxyFromEnvironment}
+	tlsConfig, err := relayclient.TLSConfigForURL(c.url, c.options)
+	if err != nil {
+		return err
+	}
+	dialer := websocket.Dialer{Proxy: http.ProxyFromEnvironment, TLSClientConfig: tlsConfig}
 	headers := http.Header{}
 	if c.token != "" {
 		headers.Set(authHeader, c.token)

@@ -14,6 +14,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 )
 
 func TestSubscribeErrorMessageUsesSentinelErrors(t *testing.T) {
@@ -239,7 +240,7 @@ func TestRelayRendezvousDeleteAndSlotFullOverHTTP(t *testing.T) {
 	logger := testLogger(t)
 	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
 	defer server.Close()
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}

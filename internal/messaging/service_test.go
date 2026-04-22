@@ -16,6 +16,7 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/relayclient"
 	"github.com/elpdev/pando/internal/store"
 	wsclient "github.com/elpdev/pando/internal/transport/ws"
 	"net/http/httptest"
@@ -808,13 +809,13 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity(), relayclient.ClientOptions{})
 	defer aliceClient.Close()
 	publishDirectoryEntry(t, server, aliceService.Identity())
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
-	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity(), relayclient.ClientOptions{})
 	defer bobClient.Close()
 	publishDirectoryEntry(t, server, bobService.Identity())
 	if err := bobClient.Connect(ctx); err != nil {
@@ -1131,13 +1132,13 @@ func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity(), relayclient.ClientOptions{})
 	defer aliceClient.Close()
 	publishDirectoryEntry(t, server, aliceService.Identity())
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
-	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity(), relayclient.ClientOptions{})
 	defer bobClient.Close()
 	publishDirectoryEntry(t, server, bobService.Identity())
 	if err := bobClient.Connect(ctx); err != nil {
@@ -1389,7 +1390,7 @@ func cloneContact(contact *identity.Contact) *identity.Contact {
 
 func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
 	t.Helper()
-	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", relayclient.ClientOptions{})
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}

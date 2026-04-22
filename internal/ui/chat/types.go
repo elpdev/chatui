@@ -18,6 +18,7 @@ type Deps struct {
 	RecipientMailbox      string
 	RelayURL              string
 	RelayToken            string
+	RelayCAPath           string
 	RelayProfiles         []config.RelayProfile
 	RelayClientFactory    func(url, token string) (RelayClient, error)
 	RelayTransportFactory func(url, token string) transport.Client

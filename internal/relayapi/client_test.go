@@ -5,11 +5,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/relayclient"
 )
 
 func TestRelayHTTPBaseURLConvertsWebsocketURLs(t *testing.T) {
@@ -309,8 +312,31 @@ func mustSignedDirectoryEntry(t *testing.T, id *identity.Identity, version int64
 }
 
 func TestNewClientRejectsInvalidRelayURL(t *testing.T) {
-	_, err := NewClient("mailto:relay", "")
+	_, err := NewClient("mailto:relay", "", relayclient.ClientOptions{})
 	if err == nil || !strings.Contains(err.Error(), "unsupported relay URL scheme") {
 		t.Fatalf("expected invalid relay url error, got %v", err)
+	}
+}
+
+func TestNewClientIgnoresRelayCAForPlainHTTP(t *testing.T) {
+	_, err := NewClient("ws://relay.example/ws", "", relayclient.ClientOptions{CAPath: filepath.Join(t.TempDir(), "missing.pem")})
+	if err != nil {
+		t.Fatalf("expected plain ws relay to ignore CA path, got %v", err)
+	}
+}
+
+func TestNewClientRejectsInvalidRelayCAForTLS(t *testing.T) {
+	_, err := NewClient("wss://relay.example/ws", "", relayclient.ClientOptions{CAPath: filepath.Join(t.TempDir(), "missing.pem")})
+	if err == nil || !strings.Contains(err.Error(), "read relay CA file") {
+		t.Fatalf("expected relay CA read error, got %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(path, []byte("not a pem"), 0o600); err != nil {
+		t.Fatalf("write invalid pem: %v", err)
+	}
+	_, err = NewClient("https://relay.example", "", relayclient.ClientOptions{CAPath: path})
+	if err == nil || !strings.Contains(err.Error(), "no PEM certificates found") {
+		t.Fatalf("expected invalid PEM error, got %v", err)
 	}
 }
