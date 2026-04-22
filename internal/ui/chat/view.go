@@ -164,7 +164,7 @@ func (m *Model) renderConversation() string {
 			style.Italic.Render("the right to a private conversation is not a feature."),
 			style.Italic.Render("it is a prerequisite for free thought."),
 			"",
-			style.Bold.Render("conversations should belong only to the people having them."),
+			style.Bold.Render("a conversation belongs to the people in it."),
 			"",
 			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+p to add one."),
 		}, "\n")
