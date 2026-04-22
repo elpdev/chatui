@@ -205,6 +205,43 @@ func rootNodes(ctx paletteCtx) []paletteNode {
 			visible: func(c paletteCtx) bool { return c.hasPeer },
 			action:  &commandPaletteAction{command: commandPaletteCommandAttachFile},
 		},
+		{
+			id:      string(commandPaletteCommandStopVoiceNote),
+			title:   "Stop voice note",
+			detail:  "Stop the voice note that is currently playing.",
+			meta:    "VOICE",
+			aliases: []string{"voice", "audio", "stop", "playback"},
+			visible: func(c paletteCtx) bool { return c.voicePlaybackActive },
+			action:  &commandPaletteAction{command: commandPaletteCommandStopVoiceNote},
+		},
+		voiceNotesNode(),
+	}
+}
+
+func voiceNotesNode() paletteNode {
+	return paletteNode{
+		id:      paletteNodeIDVoiceNotes,
+		title:   "Voice notes",
+		detail:  "Browse recent voice notes in this chat and play one in the terminal.",
+		meta:    "VOICE",
+		aliases: []string{"voice", "audio", "notes", "play"},
+		visible: func(c paletteCtx) bool { return c.hasPeer && len(c.voiceNotes) > 0 },
+		dynamic: true,
+		children: func(c paletteCtx) []paletteNode {
+			nodes := make([]paletteNode, 0, len(c.voiceNotes))
+			for _, note := range c.voiceNotes {
+				note := note
+				nodes = append(nodes, paletteNode{
+					id:      note.id,
+					title:   note.filename,
+					detail:  formatVoiceNoteDetail(note),
+					meta:    "VOICE",
+					aliases: []string{note.filename, note.direction, "voice", "audio"},
+					action:  &commandPaletteAction{command: commandPaletteCommandPlayVoiceNote, voiceNoteID: note.id},
+				})
+			}
+			return nodes
+		},
 	}
 }
 

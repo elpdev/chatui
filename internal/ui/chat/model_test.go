@@ -52,6 +52,41 @@ type switchClient struct {
 	events chan transport.Event
 }
 
+type fakeVoicePlayer struct {
+	plays    []string
+	stops    int
+	closed   bool
+	playing  bool
+	lastMIME string
+	lastData []byte
+	err      error
+}
+
+func (p *fakeVoicePlayer) Play(filename, mimeType string, data []byte) error {
+	if p.err != nil {
+		return p.err
+	}
+	p.plays = append(p.plays, filename)
+	p.lastMIME = mimeType
+	p.lastData = append([]byte(nil), data...)
+	p.playing = true
+	return nil
+}
+
+func (p *fakeVoicePlayer) Stop() error {
+	p.stops++
+	p.playing = false
+	return nil
+}
+
+func (p *fakeVoicePlayer) Close() error {
+	p.closed = true
+	p.playing = false
+	return nil
+}
+
+func (p *fakeVoicePlayer) IsPlaying() bool { return p.playing }
+
 func newSwitchClient(name string) *switchClient {
 	return &switchClient{name: name, events: make(chan transport.Event)}
 }
@@ -2047,6 +2082,72 @@ func TestCommandPaletteRootSearchDrillsIntoThemeSubmenu(t *testing.T) {
 	}
 }
 
+func TestCommandPalettePlaysRecentVoiceNote(t *testing.T) {
+	player := &fakeVoicePlayer{}
+	model := newHelpTestModel(t)
+	model.voicePlayer = player
+
+	voicePath := filepath.Join(t.TempDir(), "clip.wav")
+	if err := os.WriteFile(voicePath, mustVoiceBytes(), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+	attachment := messaging.NewAttachmentRecord(messaging.AttachmentTypeVoice, "clip.wav", "audio/wav", voicePath, int64(len(mustVoiceBytes())))
+	if err := model.messaging.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypeVoice, "clip.wav", voicePath), time.Now().UTC(), attachment, time.Time{}); err != nil {
+		t.Fatalf("save voice note history: %v", err)
+	}
+	model.peer.mailbox = "bob"
+	model.peer.label = "bob"
+	model.loadHistory()
+
+	openPaletteCommand(t, model, "voice")
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDVoiceNotes) {
+		t.Fatalf("expected voice notes submenu to open, got path=%v", model.commandPalette.path)
+	}
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected playback command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected playback result message")
+	}
+	_, _ = model.Update(msg)
+	if len(player.plays) != 1 || player.plays[0] != "clip.wav" {
+		t.Fatalf("expected clip.wav to play, got %+v", player.plays)
+	}
+	if player.lastMIME != "audio/wav" {
+		t.Fatalf("expected audio/wav mime type, got %q", player.lastMIME)
+	}
+	if len(player.lastData) == 0 {
+		t.Fatal("expected voice bytes to be passed to player")
+	}
+	toast, _ := model.Toast()
+	if !strings.Contains(toast, "playing voice note: clip.wav") {
+		t.Fatalf("unexpected toast: %q", toast)
+	}
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after selecting a voice note")
+	}
+}
+
+func TestCommandPaletteStopsVoicePlayback(t *testing.T) {
+	player := &fakeVoicePlayer{playing: true}
+	model := newHelpTestModel(t)
+	model.voicePlayer = player
+
+	_, cmd := openPaletteCommand(t, model, "stop voice")
+	if cmd != nil {
+		drainMsg(t, model, cmd)
+	}
+	if player.stops != 1 {
+		t.Fatalf("expected one stop call, got %d", player.stops)
+	}
+	toast, _ := model.Toast()
+	if toast != "voice note playback stopped" {
+		t.Fatalf("unexpected toast: %q", toast)
+	}
+}
+
 func TestTabTogglesFocus(t *testing.T) {
 	model := newHelpTestModel(t)
 
@@ -2140,10 +2241,11 @@ func TestManifestoCardShownWhenNoChatSelected(t *testing.T) {
 	}
 
 	model := New(Deps{
-		Client:    stubClient{},
-		Messaging: service,
-		Mailbox:   "alice",
-		RelayURL:  "ws://localhost:8080/ws",
+		Client:      stubClient{},
+		Messaging:   service,
+		VoicePlayer: &fakeVoicePlayer{},
+		Mailbox:     "alice",
+		RelayURL:    "ws://localhost:8080/ws",
 	})
 	model.SetSize(120, 20)
 

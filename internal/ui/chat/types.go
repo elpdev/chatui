@@ -13,6 +13,7 @@ import (
 type Deps struct {
 	Client                transport.Client
 	Messaging             *messaging.Service
+	VoicePlayer           VoicePlayer
 	Mailbox               string
 	RecipientMailbox      string
 	RelayURL              string
@@ -23,6 +24,13 @@ type Deps struct {
 	SaveTheme             func(name string) error
 	SaveMessageTTL        func(time.Duration) error
 	SaveRelays            func(relays []config.RelayProfile, active string) error
+}
+
+type VoicePlayer interface {
+	Play(filename, mimeType string, data []byte) error
+	Stop() error
+	Close() error
+	IsPlaying() bool
 }
 
 // Dependencies.
@@ -172,6 +180,11 @@ type sendResultMsg struct {
 	body       string
 	attachment *store.AttachmentRecord
 	err        error
+}
+
+type voicePlaybackResultMsg struct {
+	filename string
+	err      error
 }
 
 const (
