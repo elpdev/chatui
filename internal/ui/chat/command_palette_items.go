@@ -274,7 +274,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Ask a discoverable mailbox to connect without importing them yet.",
 					meta:    "SEND",
 					aliases: []string{"send", "request", "introduce", "invite"},
-					action:  &commandPaletteAction{command: commandPaletteCommandSendContactRequest},
+					view:    paletteViewContactRequestSend,
 				},
 				{
 					id:      string(commandPaletteCommandContactRequests),

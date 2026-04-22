@@ -19,8 +19,6 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 	case commandPaletteCommandAddContact:
 		m.openAddContactModal()
 		return nil
-	case commandPaletteCommandSendContactRequest:
-		return m.openContactRequestSendModal()
 	case commandPaletteCommandContactRequests:
 		m.openContactRequestsModal()
 		return nil

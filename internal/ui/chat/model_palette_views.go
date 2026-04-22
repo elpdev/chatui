@@ -12,6 +12,8 @@ func (m *Model) resolvePaletteView(id paletteViewID) paletteView {
 		return &peerDetailView{m: m}
 	case paletteViewContactVerify:
 		return &m.contactVerify
+	case paletteViewContactRequestSend:
+		return &m.contactRequestSend
 	}
 	return nil
 }

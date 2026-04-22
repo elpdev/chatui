@@ -248,8 +248,6 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddRelayClosedMsg(msg)
 	case contactRequestSendResultMsg:
 		return m.handleContactRequestSendResult(msg)
-	case contactRequestSendClosedMsg:
-		return m.handleContactRequestSendClosedMsg(msg)
 	case contactVerifyConfirmedMsg:
 		return m.handleContactVerifyConfirmedMsg(msg)
 	case editRelaySavedMsg:

@@ -23,12 +23,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	}
-	if m.contactRequestSend.open {
-		if handled, cmd := m.contactRequestSend.Update(msg); handled {
-			return true, cmd
-		}
-	}
-
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return false, nil
