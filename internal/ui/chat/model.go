@@ -48,7 +48,6 @@ type Model struct {
 	contactVerify        contactVerifyModal
 	contactRequests      contactRequestsModal
 	pendingRequestsCount int
-	peerDetailOpen       bool
 	unread               map[string]int
 }
 
@@ -231,6 +230,14 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		}
 	case paletteCloseMsg:
 		return m.handlePaletteCloseMsg(msg)
+	case paletteNavigateMsg:
+		return m, m.commandPalette.OpenAtPath(msg.path)
+	case paletteBackMsg:
+		m.commandPalette.back()
+		if !m.commandPalette.open && m.ui.focus == focusChat {
+			m.input.Focus()
+		}
+		return m, nil
 	case addContactCompletedMsg:
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:
@@ -245,8 +252,6 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleContactRequestSendClosedMsg(msg)
 	case contactVerifyConfirmedMsg:
 		return m.handleContactVerifyConfirmedMsg(msg)
-	case contactVerifyClosedMsg:
-		return m.handleContactVerifyClosedMsg(msg)
 	case editRelaySavedMsg:
 		return m.handleEditRelaySavedMsg(msg)
 	case contactRequestsClosedMsg:

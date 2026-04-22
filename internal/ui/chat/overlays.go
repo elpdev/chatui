@@ -28,11 +28,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	}
-	if m.contactVerify.open {
-		if handled, cmd := m.contactVerify.Update(msg); handled {
-			return true, cmd
-		}
-	}
 
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -71,21 +66,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, func() tea.Msg { return next }
 		}
 	}
-	if m.peerDetailOpen {
-		return true, m.handlePeerDetailKey(keyMsg)
-	}
+	_ = keyMsg
 	return false, nil
-}
-
-func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
-	if m.canVerifyActiveContact() && (msg.String() == "v" || msg.String() == "y") {
-		return m.openContactVerifyModal()
-	}
-	if msg.Type == tea.KeyEsc {
-		m.peerDetailOpen = false
-		if m.ui.focus == focusChat {
-			m.input.Focus()
-		}
-	}
-	return nil
 }

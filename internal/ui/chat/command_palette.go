@@ -155,22 +155,29 @@ func (m *commandPaletteModel) Open() tea.Cmd {
 	return m.filter.Focus()
 }
 
-// OpenAtPath opens the palette and jumps straight to the node at the given id
-// path. If the path points to a view node, the view's Open hook is triggered
-// via deps.onEnterView. Used by hotkeys that open a specific palette view
-// (e.g. `?` opens Settings › Help).
+// OpenAtPath opens the palette (if not already open) and jumps straight to
+// the node at the given id path. Any active view on the previous path is
+// closed first; if the new path targets a view node, its Open hook fires via
+// deps.onEnterView.
 func (m *commandPaletteModel) OpenAtPath(path []string) tea.Cmd {
+	if oldID := m.activeViewID(); oldID != paletteViewNone && m.deps.onExitView != nil {
+		m.deps.onExitView(oldID)
+	}
+	wasOpen := m.open
 	m.open = true
 	m.path = append(m.path[:0], path...)
 	m.selected = 0
 	m.filter.SetValue("")
-	cmd := m.filter.Focus()
+	var focusCmd tea.Cmd
+	if !wasOpen {
+		focusCmd = m.filter.Focus()
+	}
 	if id := m.activeViewID(); id != paletteViewNone && m.deps.onEnterView != nil {
 		if enterCmd := m.deps.onEnterView(id); enterCmd != nil {
-			return tea.Batch(cmd, enterCmd)
+			return tea.Batch(focusCmd, enterCmd)
 		}
 	}
-	return cmd
+	return focusCmd
 }
 
 func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int, voiceNotes []voiceNoteOption, voicePlaybackActive bool) {

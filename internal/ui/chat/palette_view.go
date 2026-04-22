@@ -60,3 +60,24 @@ func dismissPaletteCmd() tea.Cmd {
 func completePaletteCmd(toast string, kind ToastLevel) tea.Cmd {
 	return func() tea.Msg { return paletteCloseMsg{toast: toast, toastKind: kind} }
 }
+
+// paletteNavigateMsg asks the Model to jump the palette's current path to the
+// target id list. Used by views that need to chain into another view — e.g.,
+// pressing `v` in peer detail opens the Verify contact view.
+type paletteNavigateMsg struct {
+	path []string
+}
+
+func paletteNavigateCmd(path ...string) tea.Cmd {
+	segs := append([]string(nil), path...)
+	return func() tea.Msg { return paletteNavigateMsg{path: segs} }
+}
+
+// paletteBackMsg asks the palette to pop the current path segment, used by
+// views that want keys other than Esc to trigger back-navigation (e.g., q/n
+// in Verify contact).
+type paletteBackMsg struct{}
+
+func paletteBackCmd() tea.Cmd {
+	return func() tea.Msg { return paletteBackMsg{} }
+}

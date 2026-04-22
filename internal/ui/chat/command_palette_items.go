@@ -292,7 +292,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Confirm the active contact's fingerprint and mark them as manually verified.",
 					meta:    "VERIFY",
 					aliases: []string{"verify", "trust", "fingerprint"},
-					action:  &commandPaletteAction{command: commandPaletteCommandVerifyContact},
+					view:    paletteViewContactVerify,
 				})
 				kids = append(kids, paletteNode{
 					id:      string(commandPaletteCommandPeerDetail),
@@ -300,7 +300,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Inspect the current peer fingerprint, trust state, devices, and relay.",
 					meta:    "DETAIL",
 					aliases: []string{"detail", "peer", "info"},
-					action:  &commandPaletteAction{command: commandPaletteCommandPeerDetail},
+					view:    paletteViewPeerDetail,
 				})
 			}
 			return kids

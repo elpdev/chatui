@@ -2296,8 +2296,8 @@ func TestPeerDetailDrawerToggle(t *testing.T) {
 	model.SetSize(120, 24)
 
 	openPaletteCommand(t, model, "detail")
-	if !model.peerDetailOpen {
-		t.Fatal("expected palette command to open peer detail")
+	if model.commandPalette.activeViewID() != paletteViewPeerDetail {
+		t.Fatalf("expected palette at peer-detail view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 	view := model.View()
 	if !strings.Contains(view, "Peer detail") {
@@ -2308,9 +2308,12 @@ func TestPeerDetailDrawerToggle(t *testing.T) {
 		t.Fatalf("expected formatted fingerprint in drawer: %q", view)
 	}
 
+	// Esc pops peer-detail → Contacts → Pando; third Esc closes palette.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.peerDetailOpen {
-		t.Fatal("expected esc to close the drawer")
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected repeated esc to close the palette")
 	}
 }
 

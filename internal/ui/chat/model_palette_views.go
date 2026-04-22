@@ -8,6 +8,10 @@ func (m *Model) resolvePaletteView(id paletteViewID) paletteView {
 	switch id {
 	case paletteViewHelp:
 		return helpView{}
+	case paletteViewPeerDetail:
+		return &peerDetailView{m: m}
+	case paletteViewContactVerify:
+		return &m.contactVerify
 	}
 	return nil
 }

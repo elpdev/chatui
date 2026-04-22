@@ -26,13 +26,6 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return nil
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()
-	case commandPaletteCommandPeerDetail:
-		if m.peer.mailbox != "" {
-			m.peerDetailOpen = true
-		}
-		return nil
-	case commandPaletteCommandVerifyContact:
-		return m.openContactVerifyModal()
 	case commandPaletteCommandThemes:
 		return m.applyPaletteTheme(action.themeName)
 	case commandPaletteCommandSwitchRelay:
