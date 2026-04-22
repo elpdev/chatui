@@ -14,6 +14,8 @@ func (m *Model) resolvePaletteView(id paletteViewID) paletteView {
 		return &m.contactVerify
 	case paletteViewContactRequestSend:
 		return &m.contactRequestSend
+	case paletteViewAddRelay:
+		return &m.addRelay
 	}
 	return nil
 }
@@ -29,6 +31,7 @@ func (m *Model) enterPaletteView(id paletteViewID) tea.Cmd {
 	return view.Open(viewOpenCtx{
 		peerMailbox:     m.peer.mailbox,
 		peerFingerprint: m.peer.fingerprint,
+		path:            append([]string(nil), m.commandPalette.path...),
 	})
 }
 

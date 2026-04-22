@@ -1914,8 +1914,8 @@ func TestAddRelayModalSavesRelayProfile(t *testing.T) {
 	}
 
 	openPaletteCommand(t, model, "add relay")
-	if !model.addRelay.open {
-		t.Fatal("expected add relay modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddRelay {
+		t.Fatalf("expected palette at add-relay view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 	for _, text := range []string{"prod", "wss://relay.example/ws", "secret"} {
 		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
@@ -1930,8 +1930,8 @@ func TestAddRelayModalSavesRelayProfile(t *testing.T) {
 		t.Fatal("expected add relay save message")
 	}
 	_, _ = model.Update(msg)
-	if model.addRelay.open {
-		t.Fatal("expected add relay modal to close after save")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after save")
 	}
 	if savedActive != "prod" {
 		t.Fatalf("expected new relay to become active, got %q", savedActive)
@@ -1963,8 +1963,8 @@ func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
 	if cmd != nil {
 		drainMsg(t, model, cmd)
 	}
-	if !model.addRelay.open || !model.addRelay.editing {
-		t.Fatal("expected edit relay modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddRelay || !model.addRelay.editing {
+		t.Fatalf("expected edit relay view to open, got id=%d editing=%v", model.commandPalette.activeViewID(), model.addRelay.editing)
 	}
 	if model.addRelay.inputs[0].Value() != "prod" {
 		t.Fatalf("expected relay form to load current name, got %q", model.addRelay.inputs[0].Value())
@@ -1993,8 +1993,8 @@ func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
 	}
 	_, next := model.Update(msg)
 	drainMsg(t, model, next)
-	if model.addRelay.open {
-		t.Fatal("expected edit relay modal to close after save")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after edit save")
 	}
 	if savedActive != "edge" {
 		t.Fatalf("expected renamed relay to become active selection, got %q", savedActive)

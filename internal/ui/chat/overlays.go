@@ -18,11 +18,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	}
-	if m.addRelay.open {
-		if handled, cmd := m.addRelay.Update(msg); handled {
-			return true, cmd
-		}
-	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return false, nil

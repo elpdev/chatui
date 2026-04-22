@@ -34,12 +34,8 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return m.stopVoiceNotePlayback()
 	case commandPaletteCommandVoiceNotes:
 		return nil
-	case commandPaletteCommandAddRelay:
-		return m.openAddRelayModal()
 	case commandPaletteCommandRemoveRelay:
 		return m.removeRelayProfile(action.relayName)
-	case commandPaletteCommandEditRelay:
-		return m.openEditRelayModal(action.relayName)
 	case commandPaletteCommandMessageTTL:
 		return m.applyPaletteMessageTTL(action.messageTTL)
 	default:

@@ -332,7 +332,7 @@ func relaysNode() paletteNode {
 					detail:  "Save a new relay profile with name, URL, and optional token.",
 					meta:    "ADD",
 					aliases: []string{"add", "new", "create"},
-					action:  &commandPaletteAction{command: commandPaletteCommandAddRelay},
+					view:    paletteViewAddRelay,
 				},
 				{
 					id:       paletteNodeIDEditRelay,
@@ -341,7 +341,7 @@ func relaysNode() paletteNode {
 					meta:     "EDIT",
 					aliases:  []string{"edit", "rename", "update"},
 					dynamic:  true,
-					children: relayListChildren(commandPaletteCommandEditRelay, false),
+					children: editRelayChildren,
 				},
 				{
 					id:       paletteNodeIDRemoveRelay,
@@ -395,6 +395,37 @@ func settingsNode() paletteNode {
 			}
 		},
 	}
+}
+
+func editRelayChildren(ctx paletteCtx) []paletteNode {
+	if ctx.deps.relayProfiles == nil {
+		return nil
+	}
+	relays := ctx.deps.relayProfiles()
+	current := ""
+	if ctx.deps.currentRelayName != nil {
+		current = ctx.deps.currentRelayName()
+	}
+	nodes := make([]paletteNode, 0, len(relays))
+	for _, relay := range relays {
+		detail := relay.URL
+		meta := ""
+		if relay.Token != "" {
+			detail += "  token configured"
+		}
+		if relay.Name == current {
+			meta = "ACTIVE"
+		}
+		nodes = append(nodes, paletteNode{
+			id:      relay.Name,
+			title:   relay.Name,
+			detail:  detail,
+			meta:    meta,
+			aliases: []string{relay.Name, relay.URL},
+			view:    paletteViewAddRelay,
+		})
+	}
+	return nodes
 }
 
 func relayListChildren(command commandPaletteCommand, markLocked bool) func(paletteCtx) []paletteNode {

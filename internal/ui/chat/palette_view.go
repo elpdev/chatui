@@ -37,9 +37,14 @@ type paletteView interface {
 // viewOpenCtx carries the Model-owned values a view may need at open time.
 // Kept intentionally narrow so the palette stays decoupled from the concrete
 // Model type. Fields are populated by the Model's onEnterView callback.
+//
+// path is the palette's current id path at the moment the view is entered.
+// Views that share a single struct across multiple tree locations (e.g.
+// addRelay serving both Add and Edit) use it to decide the initial mode.
 type viewOpenCtx struct {
 	peerMailbox     string
 	peerFingerprint string
+	path            []string
 }
 
 // paletteCloseMsg asks the Model to close the palette entirely — used both

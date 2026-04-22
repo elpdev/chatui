@@ -145,7 +145,7 @@ func New(deps Deps) *Model {
 		ensureRelayClient: m.ensureRelayClient,
 		relayConfigured:   m.relayConfigured,
 	})
-	m.addRelay = newAddRelayModal()
+	m.addRelay = newAddRelayModal(m)
 	m.contactRequestSend = newContactRequestSendModal(contactRequestSendDeps{
 		messaging:         deps.Messaging,
 		ensureRelayClient: m.ensureRelayClient,
@@ -244,8 +244,6 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddContactClosedMsg(msg)
 	case addRelaySavedMsg:
 		return m.handleAddRelaySavedMsg(msg)
-	case addRelayClosedMsg:
-		return m.handleAddRelayClosedMsg(msg)
 	case contactRequestSendResultMsg:
 		return m.handleContactRequestSendResult(msg)
 	case contactVerifyConfirmedMsg:
